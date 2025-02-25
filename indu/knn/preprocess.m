@@ -1,0 +1,562 @@
+clc
+clear all
+
+load('monkeydata_training.mat');
+num = 80;
+trainingData = trial(1:num, :);   % First 10 trials for training
+testData = trial(num+1:end, :);  
+trial = trainingData; % Remaining trials for testing
+%% Preprocess Data
+num_trials = size(trial,1);
+num_angles = size(trial,2);
+num_neurons = size(trial(1,1).spikes,1);
+
+% Find the minimum time length across all trials (for truncation)
+T_min = inf; % Initialize with a large value
+for angle = 1:num_angles
+    for t = 1:num_trials
+        T_min = min(T_min, size(trial(t, angle).spikes, 2));
+    end
+end
+
+% Initialize matrices for spike trains and hand trajectories
+X_data = [];
+Y_data = [];
+
+% for angle = 1:num_angles
+%     for t = 1:num_trials
+%         % Extract spike train and corresponding hand positions
+%         spikes = trial(t, angle).spikes;   % 98 x T binary matrix
+%         handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
+% 
+%         % Truncate to match T_min
+%         spikes = spikes(:, 1:T_min);
+%         handPos = handPos(1:2, 1:T_min); % Only take X and Y
+% 
+%         % Flatten spike train into a feature vector
+%         spike_vector = reshape(spikes, [], 1)'; % (98*T_min) x 1
+% 
+%         % Store the data
+%         X_data = [X_data; spike_vector]; % Feature matrix
+%         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
+%     end
+% end
+
+% Define parameters
+bin_size = 20; % 20 ms binning
+sigma = 20; % Standard deviation of Gaussian window (in ms)
+window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
+
+X_data = []; % Initialize feature matrix
+Y_data = []; % Initialize labels (hand positions)
+
+for angle = 1:num_angles
+    for t = 1:num_trials
+        % Extract spike train and corresponding hand positions
+        spikes = trial(t, angle).spikes;   % 98 x T binary matrix
+        handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
+
+        % Truncate to match T_min
+        spikes = spikes(:, 301:T_min);
+        handPos = handPos(1:2, 301:T_min); % Only take X and Y
+
+        % Convolve each neuron's spike train with Gaussian kernel
+        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+
+        % Downsample to 20ms bins
+        num_bins = floor((T_min - 300) / bin_size);
+        firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+
+        for bin = 1:num_bins
+            idx_start = (bin - 1) * bin_size + 1;
+            idx_end = bin * bin_size;
+            firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
+        end
+
+        % Flatten firing rate matrix into a feature vector
+        feature_vector = reshape(firing_rates, [], 1)'; % (98*num_bins) x 1
+
+        % Store the data
+        X_data = [X_data; feature_vector]; % Feature matrix
+        Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
+    end
+end
+X_data = X_data*1000;
+
+%% Apply PCA Using Singular Value Decomposition (SVD)
+% Normalize data before SVD
+X_mean = mean(X_data, 1);
+X_norm = X_data - X_mean; % Center data (zero mean)
+
+% Compute SVD
+[U, S, V] = svd(X_norm, 'econ'); % 'econ' mode for efficiency
+
+% Compute variance explained
+singular_values = diag(S);
+explained_variance = (singular_values.^2) / sum(singular_values.^2);
+cum_variance = cumsum(explained_variance);
+
+% Choose number of principal components to retain 95% variance
+variance_threshold = 0.95;
+num_PC = find(cum_variance >= variance_threshold, 1);
+
+% Reduce data dimensionality
+X_reduced = X_norm * V(:,1:num_PC); % Project onto principal components
+
+%% Manual LDA Implementation
+% Define class labels (use angles as class labels)
+angle_labels = repmat(1:num_angles, num_trials, 1);
+angle_labels = angle_labels(:); % Flatten into a column vector
+
+% Separate data by class (angle)
+X_class = cell(num_angles, 1);
+for i = 1:num_angles
+    X_class{i} = X_reduced(angle_labels == i, :);
+end
+
+% Compute class means and overall mean
+mean_overall = mean(X_reduced, 1);
+mean_class = zeros(num_angles, num_PC);
+for i = 1:num_angles
+    mean_class(i, :) = mean(X_class{i}, 1);
+end
+
+% Compute the Between-Class Scatter Matrix (S_B)
+S_B = zeros(num_PC, num_PC);
+for i = 1:num_angles
+    n_i = size(X_class{i}, 1);
+    mean_diff = mean_class(i, :) - mean_overall;
+    S_B = S_B + n_i * (mean_diff' * mean_diff);
+end
+
+% Compute the Within-Class Scatter Matrix (S_W)
+S_W = zeros(num_PC, num_PC);
+for i = 1:num_angles
+    scatter_matrix = cov(X_class{i});
+    S_W = S_W + scatter_matrix;
+end
+
+% Solve for the eigenvectors and eigenvalues of inv(S_W) * S_B
+[W, D] = eig(inv(S_W) * S_B);
+
+% Sort the eigenvectors by eigenvalues in descending order
+[eigenvalues, idx] = sort(diag(D), 'descend');
+W = W(:, idx);
+
+% Project the data onto the first few eigenvectors (the most significant ones)
+num_LDA_components = 2; % We choose 2 components for visualization
+X_lda = X_reduced * W(:, 1:num_LDA_components);
+
+%% Classify using Nearest Mean Classifier
+% Compute the mean of each class in the LDA space
+class_means = zeros(num_angles, num_LDA_components);
+for i = 1:num_angles
+    class_means(i, :) = mean(X_lda(angle_labels == i, :), 1);
+end
+
+% Predict labels for each data point based on nearest class mean
+predicted_labels = zeros(size(X_lda, 1), 1);
+for i = 1:size(X_lda, 1)
+    distances = vecnorm(X_lda(i, :) - class_means, 2, 2); % Euclidean distance
+    [~, predicted_labels(i)] = min(distances);
+end
+
+% Visualize the classification in the LDA space
+figure;
+scatter(X_lda(:,1), X_lda(:,2), 50, predicted_labels, 'filled');
+xlabel('LDA Component 1');
+ylabel('LDA Component 2');
+title('LDA Classification of PCA-Reduced Data');
+colormap jet;
+colorbar;
+grid on;
+
+% Initialize confusion matrix
+confusion_matrix = zeros(num_angles, num_angles);
+
+% Populate confusion matrix
+for i = 1:length(angle_labels)
+    true_class = angle_labels(i);
+    predicted_class = predicted_labels(i);
+    confusion_matrix(true_class, predicted_class) = confusion_matrix(true_class, predicted_class) + 1;
+end
+
+% Visualize the confusion matrix
+figure;
+imagesc(confusion_matrix);
+colorbar;
+xlabel('Predicted Class');
+ylabel('True Class');
+title('Confusion Matrix for Manual LDA Classification');
+axis equal;
+%%
+%Perform K-means clustering manually (without using kmeans function or pdist2)
+num_clusters = 8; % Define the number of clusters
+max_iter = 1000; % Maximum number of iterations
+tol = 1e-1; % Tolerance for convergence
+
+% Reaching angles in radians
+reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi; 
+
+% Randomly initialize centroids
+centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+
+for iter = 1:max_iter
+    % Assign each point to the nearest centroid
+    distances = zeros(size(X_lda, 1), num_clusters); % Initialize distance matrix
+
+    % Calculate Euclidean distance manually
+    for k = 1:num_clusters
+        distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2)); % Distance to centroid k
+    end
+
+    % Assign clusters based on the closest centroid
+    [~, cluster_idx] = min(distances, [], 2); % Assign clusters
+
+    % Save the previous centroids to check for convergence
+    prev_centroids = centroids;
+
+    % Recompute the centroids
+    for k = 1:num_clusters
+        centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
+    end
+
+    % Check for convergence (if centroids have not changed)
+    if norm(centroids - prev_centroids) < tol
+        break;
+    end
+end
+
+% Final cluster centers
+cluster_centers = centroids;
+
+%%
+
+% %% Classify using Nearest Mean Classifier
+% class_means = zeros(num_angles, num_LDA_components);
+% for i = 1:num_angles
+%     class_means(i, :) = mean(X_lda(angle_labels == i, :), 1);
+% end
+% predicted_labels = zeros(size(X_lda, 1), 1);
+% for i = 1:size(X_lda, 1)
+%     distances = vecnorm(X_lda(i, :) - class_means, 2, 2);
+%     [~, predicted_labels(i)] = min(distances);
+% end
+% num_clusters = 8;
+% max_iter = 1000;
+% tol = 1e-8;
+% reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
+% % Initialize centroids by selecting the closest points to each angle
+% centroids = zeros(num_clusters, size(X_lda, 2));
+% for k = 1:num_clusters
+%     angle_diffs = abs(predicted_labels - k); % Find points closest to each angle cluster
+%     [~, min_idx] = min(angle_diffs);
+%     centroids(k, :) = X_lda(min_idx, :);
+% end
+% for iter = 1:max_iter
+%     distances = zeros(size(X_lda, 1), num_clusters);
+%     for k = 1:num_clusters
+%         distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
+%     end
+%     [~, cluster_idx] = min(distances, [], 2);
+%     prev_centroids = centroids;
+% 
+%     for k = 1:num_clusters
+%         centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
+%     end
+% 
+%     if norm(centroids - prev_centroids) < tol
+%         break;
+%     end
+% end
+% cluster_centers = centroids;
+% cluster_angle_mapping = zeros(num_clusters, 1);
+% for k = 1:num_clusters
+%     cluster_trials = find(cluster_idx == k);
+%     cluster_predicted_labels = predicted_labels(cluster_trials);
+%     most_common_angle = mode(cluster_predicted_labels);
+%     cluster_angle_mapping(k) = reach_angles(most_common_angle);
+% end
+%%
+% Map clusters to reaching angles
+cluster_angle_mapping = zeros(num_clusters, 1);
+
+for k = 1:num_clusters
+    % Find data points in this cluster
+    cluster_trials = find(cluster_idx == k);
+    
+    % Get the predicted angles for this cluster
+    cluster_predicted_labels = predicted_labels(cluster_trials);
+    
+    % Convert labels to reaching angles
+    cluster_angles = reach_angles(cluster_predicted_labels);
+    
+    % Get the most common reaching angle for this cluster
+    most_common_angle = mode(cluster_angles);
+    
+    % Assign the most common angle to this cluster
+    cluster_angle_mapping(k) = most_common_angle;
+end
+
+%%
+% Visualize the LDA projection with clusters colored by the predicted angle mapping
+figure;
+hold on;
+
+% Use different colors for each cluster
+colors = lines(num_clusters); % Automatically generate distinct colors
+
+% Plot each data point in the LDA space, colored by cluster assignment
+for k = 1:num_clusters
+    cluster_points = X_lda(cluster_idx == k, :);
+    scatter(cluster_points(:, 1), cluster_points(:, 2), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
+end
+
+xlabel('LDA Component 1');
+ylabel('LDA Component 2');
+title('LDA Projection with Cluster Assignments');
+grid on;
+colorbar;
+
+% Update legend to show the assigned reaching angles
+legend(arrayfun(@(k) sprintf('Cluster %d (%.2f rad)', k, cluster_angle_mapping(k)), 1:num_clusters, 'UniformOutput', false));
+
+
+%%
+% Calculate accuracy of cluster-to-angle mapping
+correct_count = 0;
+
+for i = 1:length(angle_labels)
+    % Convert ground truth angle label (index) to its corresponding radian value
+    true_angle = reach_angles(angle_labels(i));  
+    
+    % Retrieve predicted angle from the mapped cluster
+    predicted_angle = cluster_angle_mapping(cluster_idx(i));  
+
+    % Compare the angles in radians
+    if abs(predicted_angle - true_angle) < 1e-3  % Allow small tolerance for numerical precision
+        correct_count = correct_count + 1;
+    end
+end
+
+% Compute accuracy
+accuracy = correct_count / length(angle_labels);
+disp(['Overall cluster-to-angle mapping accuracy: ' num2str(accuracy*100) '%']);
+
+%% Preprocess Data
+trial2 = testData;
+num_trials = size(trial2, 1);
+num_angles = size(trial2, 2);
+num_neurons = size(trial2(1, 1).spikes, 1);
+
+% Find the minimum time length across all trials (for truncation)
+T_min = inf; % Initialize with a large value
+for angle = 1:num_angles
+    for t = 1:num_trials
+        T_min = min(T_min, size(trial(t, angle).spikes, 2));
+    end
+end
+
+% Initialize matrices for spike trains and hand trajectories
+X_data = [];
+Y_data = [];
+
+% Define parameters
+bin_size = 20; % 20 ms binning
+sigma = 20; % Standard deviation of Gaussian window (in ms)
+window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
+
+X_data = []; % Initialize feature matrix
+Y_data = []; % Initialize labels (hand positions)
+
+for angle = 1:num_angles
+    for t = 1:num_trials
+        % Extract spike train and corresponding hand positions
+        spikes = trial2(t, angle).spikes;   % 98 x T binary matrix
+        handPos = trial2(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
+
+        % Truncate to match T_min
+        spikes = spikes(:, 301:T_min);
+        handPos = handPos(1:2, 301:T_min); % Only take X and Y
+
+        % Convolve each neuron's spike train with Gaussian kernel
+        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+
+        % Downsample to 20ms bins
+        num_bins = floor((T_min - 300) / bin_size);
+        firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+
+        for bin = 1:num_bins
+            idx_start = (bin - 1) * bin_size + 1;
+            idx_end = bin * bin_size;
+            firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
+        end
+
+        % Flatten firing rate matrix into a feature vector
+        feature_vector = reshape(firing_rates, [], 1)'; % (98*num_bins) x 1
+
+        % Store the data
+        X_data = [X_data; feature_vector]; % Feature matrix
+        Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
+    end
+end
+X_data = X_data*1000;
+
+%% Apply PCA Using Singular Value Decomposition (SVD)
+X_mean = mean(X_data, 1);
+X_norm = X_data - X_mean; % Center data (zero mean)
+
+% Compute SVD
+[U, S, V] = svd(X_norm, 'econ');
+
+% Compute variance explained
+singular_values = diag(S);
+explained_variance = (singular_values.^2) / sum(singular_values.^2);
+cum_variance = cumsum(explained_variance);
+
+% Choose number of principal components to retain 95% variance
+variance_threshold = 0.95;
+num_PC = find(cum_variance >= variance_threshold, 1);
+
+% Reduce data dimensionality
+X_reduced = X_norm * V(:,1:num_PC); % Project onto principal components
+
+%% Manual LDA Implementation
+angle_labels = repmat(1:num_angles, num_trials, 1);
+angle_labels = angle_labels(:); % Flatten into a column vector
+
+X_class = cell(num_angles, 1);
+for i = 1:num_angles
+    X_class{i} = X_reduced(angle_labels == i, :);
+end
+
+mean_overall = mean(X_reduced, 1);
+mean_class = zeros(num_angles, num_PC);
+for i = 1:num_angles
+    mean_class(i, :) = mean(X_class{i}, 1);
+end
+
+S_B = zeros(num_PC, num_PC);
+for i = 1:num_angles
+    n_i = size(X_class{i}, 1);
+    mean_diff = mean_class(i, :) - mean_overall;
+    S_B = S_B + n_i * (mean_diff' * mean_diff);
+end
+
+S_W = zeros(num_PC, num_PC);
+for i = 1:num_angles
+    scatter_matrix = cov(X_class{i});
+    S_W = S_W + scatter_matrix;
+end
+
+[W, D] = eig(inv(S_W) * S_B);
+
+[eigenvalues, idx] = sort(diag(D), 'descend');
+W = W(:, idx);
+
+num_LDA_components = 2; % We choose 2 components for visualization
+X_lda = X_reduced * W(:, 1:num_LDA_components);
+
+%% Classify using Nearest Mean Classifier
+class_means = zeros(num_angles, num_LDA_components);
+for i = 1:num_angles
+    class_means(i, :) = mean(X_lda(angle_labels == i, :), 1);
+end
+
+predicted_labels = zeros(size(X_lda, 1), 1);
+for i = 1:size(X_lda, 1)
+    distances = vecnorm(X_lda(i, :) - class_means, 2, 2);
+    [~, predicted_labels(i)] = min(distances);
+end
+
+%% Perform K-means clustering manually (without using kmeans function or pdist2)
+num_clusters = 8;
+max_iter = 1000;
+tol = 1e-8;
+reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
+centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+
+for iter = 1:max_iter
+    distances = zeros(size(X_lda, 1), num_clusters);
+    for k = 1:num_clusters
+        distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
+    end
+    [~, cluster_idx] = min(distances, [], 2);
+
+    prev_centroids = centroids;
+    
+    for k = 1:num_clusters
+        centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
+    end
+    
+    if norm(centroids - prev_centroids) < tol
+        break;
+    end
+end
+
+cluster_centers = centroids;
+cluster_angle_mapping = zeros(num_clusters, 1);
+
+for k = 1:num_clusters
+    cluster_trials = find(cluster_idx == k);
+    cluster_predicted_labels = predicted_labels(cluster_trials);
+    most_common_angle = mode(cluster_predicted_labels);
+    cluster_angle_mapping(k) = reach_angles(most_common_angle);
+
+end
+
+%% Step 1: Train PCR Model (All Trials & Angles)
+% Solve for regression weights using least squares
+num_Y_dims = size(Y_data, 2); % Number of hand position dimensions
+B_pcr = (X_reduced' * X_reduced) \ (X_reduced' * Y_data); % PCR coefficients
+
+% Predict hand positions for all trials & angles
+Y_pred = X_reduced * B_pcr;
+
+%% Step 2: Reshape Predictions for Visualization
+T_total = size(Y_data, 2) / 2; % Total time steps per trial (X, Y coordinates)
+num_total_trials = size(Y_data, 1);
+
+% Reshape actual and predicted trajectories
+Y_actual_reshaped = reshape(Y_data, num_total_trials, 2, T_total);  % [Trials, X/Y, Time steps]
+Y_pred_reshaped = reshape(Y_pred, num_total_trials, 2, T_total);    % [Trials, X/Y, Time steps]
+
+%% Step 3: Plot Actual vs. Predicted Trajectories for All Trials & Angles
+figure;
+hold on;
+
+% Define color for actual and predicted
+actual_color = [0, 0, 1]; % Blue
+predicted_color = [1, 0, 0]; % Red
+
+for trial_idx = 1:num_total_trials
+    % Extract actual and predicted trajectories for each trial
+    x_actual = squeeze(Y_actual_reshaped(trial_idx, 1, :));
+    y_actual = squeeze(Y_actual_reshaped(trial_idx, 2, :));
+    x_pred = squeeze(Y_pred_reshaped(trial_idx, 1, :));
+    y_pred = squeeze(Y_pred_reshaped(trial_idx, 2, :));
+    
+    % Plot actual trajectory in blue
+    plot(x_actual, y_actual, 'Color', actual_color, 'LineWidth', 1);
+    
+    % Plot predicted trajectory in red (dashed line)
+    plot(x_pred, y_pred, '--', 'Color', predicted_color, 'LineWidth', 1);
+end
+
+xlabel('X Position (cm)');
+ylabel('Y Position (cm)');
+title('Actual vs. Predicted Hand Trajectories (Aligned to 301 ms)');
+legend('Actual', 'Predicted');
+grid on;
+hold off;
+%% Step 3: Compute RMSE per Time Step (After Alignment)
+rmse_X = sqrt(mean((Y_pred_reshaped(:,1,:) - Y_actual_reshaped(:,1,:)).^2, 'all'));
+rmse_Y = sqrt(mean((Y_pred_reshaped(:,2,:) - Y_actual_reshaped(:,2,:)).^2, 'all'));
+
+% Compute total RMSE (average of RMSE for X and Y)
+total_rmse = mean([rmse_X, rmse_Y]);
+
+% Display RMSE values
+fprintf('RMSE for X: %.4f cm\n', rmse_X);
+fprintf('RMSE for Y: %.4f cm\n', rmse_Y);
+fprintf('Total RMSE: %.4f cm\n', total_rmse);
