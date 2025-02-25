@@ -19,29 +19,6 @@ for angle = 1:num_angles
     end
 end
 
-% Initialize matrices for spike trains and hand trajectories
-X_data = [];
-Y_data = [];
-
-% for angle = 1:num_angles
-%     for t = 1:num_trials
-%         % Extract spike train and corresponding hand positions
-%         spikes = trial(t, angle).spikes;   % 98 x T binary matrix
-%         handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
-% 
-%         % Truncate to match T_min
-%         spikes = spikes(:, 1:T_min);
-%         handPos = handPos(1:2, 1:T_min); % Only take X and Y
-% 
-%         % Flatten spike train into a feature vector
-%         spike_vector = reshape(spikes, [], 1)'; % (98*T_min) x 1
-% 
-%         % Store the data
-%         X_data = [X_data; spike_vector]; % Feature matrix
-%         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
-%     end
-% end
-
 % Define parameters
 bin_size = 20; % 20 ms binning
 sigma = 20; % Standard deviation of Gaussian window (in ms)
@@ -144,7 +121,7 @@ end
 W = W(:, idx);
 
 % Project the data onto the first few eigenvectors (the most significant ones)
-num_LDA_components = 2; % We choose 2 components for visualization
+num_LDA_components = 3; % We choose 2 components for visualization
 X_lda = X_reduced * W(:, 1:num_LDA_components);
 
 %% Classify using Nearest Mean Classifier
@@ -163,7 +140,7 @@ end
 
 % Visualize the classification in the LDA space
 figure;
-scatter(X_lda(:,1), X_lda(:,2), 50, predicted_labels, 'filled');
+scatter3(X_lda(:,1), X_lda(:,2),X_lda(:,3), 50, predicted_labels, 'filled');
 xlabel('LDA Component 1');
 ylabel('LDA Component 2');
 title('LDA Classification of PCA-Reduced Data');
@@ -195,11 +172,25 @@ num_clusters = 8; % Define the number of clusters
 max_iter = 1000; % Maximum number of iterations
 tol = 1e-1; % Tolerance for convergence
 
-% Reaching angles in radians
+% Define reaching angles in radians
 reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi; 
 
-% Randomly initialize centroids
-centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+% Initialize centroids by taking the mean position of each angle's data
+centroids = zeros(num_clusters, size(X_lda, 2)); % Allocate space for centroids
+
+for k = 1:num_clusters
+    % Find all points in X_lda corresponding to the k-th reaching angle
+    cluster_points = X_lda(predicted_labels == k, :);
+    
+    % Set initial centroid as the mean of these points
+    if ~isempty(cluster_points)
+        centroids(k, :) = mean(cluster_points, 1);
+    else
+        % If no data points exist for this angle, assign a random point (fallback)
+        centroids(k, :) = X_lda(randi(size(X_lda, 1)), :);
+    end
+end
+
 
 for iter = 1:max_iter
     % Assign each point to the nearest centroid
@@ -301,7 +292,6 @@ end
 %%
 % Visualize the LDA projection with clusters colored by the predicted angle mapping
 figure;
-hold on;
 
 % Use different colors for each cluster
 colors = lines(num_clusters); % Automatically generate distinct colors
@@ -309,7 +299,8 @@ colors = lines(num_clusters); % Automatically generate distinct colors
 % Plot each data point in the LDA space, colored by cluster assignment
 for k = 1:num_clusters
     cluster_points = X_lda(cluster_idx == k, :);
-    scatter(cluster_points(:, 1), cluster_points(:, 2), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
+    scatter3(cluster_points(:, 1), cluster_points(:, 2),cluster_points(:,3), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
+    hold on
 end
 
 xlabel('LDA Component 1');
@@ -357,9 +348,6 @@ for angle = 1:num_angles
     end
 end
 
-% Initialize matrices for spike trains and hand trajectories
-X_data = [];
-Y_data = [];
 
 % Define parameters
 bin_size = 20; % 20 ms binning
@@ -469,41 +457,9 @@ for i = 1:size(X_lda, 1)
     [~, predicted_labels(i)] = min(distances);
 end
 
-%% Perform K-means clustering manually (without using kmeans function or pdist2)
-num_clusters = 8;
-max_iter = 1000;
-tol = 1e-8;
-reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
-centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+%%
 
-for iter = 1:max_iter
-    distances = zeros(size(X_lda, 1), num_clusters);
-    for k = 1:num_clusters
-        distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
-    end
-    [~, cluster_idx] = min(distances, [], 2);
 
-    prev_centroids = centroids;
-    
-    for k = 1:num_clusters
-        centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
-    end
-    
-    if norm(centroids - prev_centroids) < tol
-        break;
-    end
-end
-
-cluster_centers = centroids;
-cluster_angle_mapping = zeros(num_clusters, 1);
-
-for k = 1:num_clusters
-    cluster_trials = find(cluster_idx == k);
-    cluster_predicted_labels = predicted_labels(cluster_trials);
-    most_common_angle = mode(cluster_predicted_labels);
-    cluster_angle_mapping(k) = reach_angles(most_common_angle);
-
-end
 
 %% Step 1: Train PCR Model (All Trials & Angles)
 % Solve for regression weights using least squares

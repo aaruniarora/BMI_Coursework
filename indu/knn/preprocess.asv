@@ -20,8 +20,8 @@ for angle = 1:num_angles
 end
 
 % Initialize matrices for spike trains and hand trajectories
-X_data = [];
-Y_data = [];
+% X_data = [];
+% Y_data = [];
 
 % for angle = 1:num_angles
 %     for t = 1:num_trials
@@ -144,7 +144,7 @@ end
 W = W(:, idx);
 
 % Project the data onto the first few eigenvectors (the most significant ones)
-num_LDA_components = 2; % We choose 2 components for visualization
+num_LDA_components = 3; % We choose 2 components for visualization
 X_lda = X_reduced * W(:, 1:num_LDA_components);
 
 %% Classify using Nearest Mean Classifier
@@ -163,7 +163,7 @@ end
 
 % Visualize the classification in the LDA space
 figure;
-scatter(X_lda(:,1), X_lda(:,2), 50, predicted_labels, 'filled');
+scatter3(X_lda(:,1), X_lda(:,2),X_lda(:,3), 50, predicted_labels, 'filled');
 xlabel('LDA Component 1');
 ylabel('LDA Component 2');
 title('LDA Classification of PCA-Reduced Data');
@@ -190,37 +190,51 @@ ylabel('True Class');
 title('Confusion Matrix for Manual LDA Classification');
 axis equal;
 %%
-% Perform K-means clustering manually (without using kmeans function or pdist2)
+%Perform K-means clustering manually (without using kmeans function or pdist2)
 num_clusters = 8; % Define the number of clusters
 max_iter = 1000; % Maximum number of iterations
-tol = 1e-8; % Tolerance for convergence
+tol = 1e-1; % Tolerance for convergence
 
-% Reaching angles in radians
+% Define reaching angles in radians
 reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi; 
 
-% Randomly initialize centroids
-centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+% Initialize centroids by taking the mean position of each angle's data
+centroids = zeros(num_clusters, size(X_lda, 2)); % Allocate space for centroids
+
+for k = 1:num_clusters
+    % Find all points in X_lda corresponding to the k-th reaching angle
+    cluster_points = X_lda(predicted_labels == k, :);
+    
+    % Set initial centroid as the mean of these points
+    if ~isempty(cluster_points)
+        centroids(k, :) = mean(cluster_points, 1);
+    else
+        % If no data points exist for this angle, assign a random point (fallback)
+        centroids(k, :) = X_lda(randi(size(X_lda, 1)), :);
+    end
+end
+
 
 for iter = 1:max_iter
     % Assign each point to the nearest centroid
     distances = zeros(size(X_lda, 1), num_clusters); % Initialize distance matrix
-    
+
     % Calculate Euclidean distance manually
     for k = 1:num_clusters
         distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2)); % Distance to centroid k
     end
-    
+
     % Assign clusters based on the closest centroid
     [~, cluster_idx] = min(distances, [], 2); % Assign clusters
-    
+
     % Save the previous centroids to check for convergence
     prev_centroids = centroids;
-    
+
     % Recompute the centroids
     for k = 1:num_clusters
         centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
     end
-    
+
     % Check for convergence (if centroids have not changed)
     if norm(centroids - prev_centroids) < tol
         break;
@@ -230,6 +244,53 @@ end
 % Final cluster centers
 cluster_centers = centroids;
 
+%%
+
+% %% Classify using Nearest Mean Classifier
+% class_means = zeros(num_angles, num_LDA_components);
+% for i = 1:num_angles
+%     class_means(i, :) = mean(X_lda(angle_labels == i, :), 1);
+% end
+% predicted_labels = zeros(size(X_lda, 1), 1);
+% for i = 1:size(X_lda, 1)
+%     distances = vecnorm(X_lda(i, :) - class_means, 2, 2);
+%     [~, predicted_labels(i)] = min(distances);
+% end
+% num_clusters = 8;
+% max_iter = 1000;
+% tol = 1e-8;
+% reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
+% % Initialize centroids by selecting the closest points to each angle
+% centroids = zeros(num_clusters, size(X_lda, 2));
+% for k = 1:num_clusters
+%     angle_diffs = abs(predicted_labels - k); % Find points closest to each angle cluster
+%     [~, min_idx] = min(angle_diffs);
+%     centroids(k, :) = X_lda(min_idx, :);
+% end
+% for iter = 1:max_iter
+%     distances = zeros(size(X_lda, 1), num_clusters);
+%     for k = 1:num_clusters
+%         distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
+%     end
+%     [~, cluster_idx] = min(distances, [], 2);
+%     prev_centroids = centroids;
+% 
+%     for k = 1:num_clusters
+%         centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
+%     end
+% 
+%     if norm(centroids - prev_centroids) < tol
+%         break;
+%     end
+% end
+% cluster_centers = centroids;
+% cluster_angle_mapping = zeros(num_clusters, 1);
+% for k = 1:num_clusters
+%     cluster_trials = find(cluster_idx == k);
+%     cluster_predicted_labels = predicted_labels(cluster_trials);
+%     most_common_angle = mode(cluster_predicted_labels);
+%     cluster_angle_mapping(k) = reach_angles(most_common_angle);
+% end
 %%
 % Map clusters to reaching angles
 cluster_angle_mapping = zeros(num_clusters, 1);
@@ -254,15 +315,15 @@ end
 %%
 % Visualize the LDA projection with clusters colored by the predicted angle mapping
 figure;
-hold on;
 
 % Use different colors for each cluster
 colors = lines(num_clusters); % Automatically generate distinct colors
 
 % Plot each data point in the LDA space, colored by cluster assignment
+hold on
 for k = 1:num_clusters
     cluster_points = X_lda(cluster_idx == k, :);
-    scatter(cluster_points(:, 1), cluster_points(:, 2), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
+    scatter3(cluster_points(:, 1), cluster_points(:, 2),cluster_points(:,3), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
 end
 
 xlabel('LDA Component 1');
@@ -474,7 +535,6 @@ num_total_trials = size(Y_data, 1);
 Y_actual_reshaped = reshape(Y_data, num_total_trials, 2, T_total);  % [Trials, X/Y, Time steps]
 Y_pred_reshaped = reshape(Y_pred, num_total_trials, 2, T_total);    % [Trials, X/Y, Time steps]
 
-
 %% Step 3: Plot Actual vs. Predicted Trajectories for All Trials & Angles
 figure;
 hold on;
@@ -485,10 +545,10 @@ predicted_color = [1, 0, 0]; % Red
 
 for trial_idx = 1:num_total_trials
     % Extract actual and predicted trajectories for each trial
-    x_actual = squeeze(Y_actual_reshaped_aligned(trial_idx, 1, :));
-    y_actual = squeeze(Y_actual_reshaped_aligned(trial_idx, 2, :));
-    x_pred = squeeze(Y_pred_reshaped_aligned(trial_idx, 1, :));
-    y_pred = squeeze(Y_pred_reshaped_aligned(trial_idx, 2, :));
+    x_actual = squeeze(Y_actual_reshaped(trial_idx, 1, :));
+    y_actual = squeeze(Y_actual_reshaped(trial_idx, 2, :));
+    x_pred = squeeze(Y_pred_reshaped(trial_idx, 1, :));
+    y_pred = squeeze(Y_pred_reshaped(trial_idx, 2, :));
     
     % Plot actual trajectory in blue
     plot(x_actual, y_actual, 'Color', actual_color, 'LineWidth', 1);
@@ -504,8 +564,8 @@ legend('Actual', 'Predicted');
 grid on;
 hold off;
 %% Step 3: Compute RMSE per Time Step (After Alignment)
-rmse_X = sqrt(mean((Y_pred_reshaped_aligned(:,1,:) - Y_actual_reshaped_aligned(:,1,:)).^2, 'all'));
-rmse_Y = sqrt(mean((Y_pred_reshaped_aligned(:,2,:) - Y_actual_reshaped_aligned(:,2,:)).^2, 'all'));
+rmse_X = sqrt(mean((Y_pred_reshaped(:,1,:) - Y_actual_reshaped(:,1,:)).^2, 'all'));
+rmse_Y = sqrt(mean((Y_pred_reshaped(:,2,:) - Y_actual_reshaped(:,2,:)).^2, 'all'));
 
 % Compute total RMSE (average of RMSE for X and Y)
 total_rmse = mean([rmse_X, rmse_Y]);
