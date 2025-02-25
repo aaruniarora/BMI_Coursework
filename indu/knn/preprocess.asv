@@ -19,28 +19,58 @@ for angle = 1:num_angles
     end
 end
 
-% Initialize matrices for spike trains and hand trajectories
-% X_data = [];
-% Y_data = [];
+% Define parameters
+bin_size = 20; % 20 ms binning
+sigma = 20; % Standard deviation of Gaussian window (in ms)
+window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
 
-% for angle = 1:num_angles
-%     for t = 1:num_trials
-%         % Extract spike train and corresponding hand positions
-%         spikes = trial(t, angle).spikes;   % 98 x T binary matrix
-%         handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
-% 
-%         % Truncate to match T_min
-%         spikes = spikes(:, 1:T_min);
-%         handPos = handPos(1:2, 1:T_min); % Only take X and Y
-% 
-%         % Flatten spike train into a feature vector
-%         spike_vector = reshape(spikes, [], 1)'; % (98*T_min) x 1
-% 
-%         % Store the data
-%         X_data = [X_data; spike_vector]; % Feature matrix
-%         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
-%     end
-% end
+X_data = []; % Initialize feature matrix
+Y_data = []; % Initialize labels (hand positions)
+
+for angle = 1:num_angles
+    for t = 1:num_trials
+        % Extract spike train and corresponding hand positions
+        spikes = trial(t, angle).spikes;   % 98 x T binary matrix
+        handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
+
+        % Truncate to match T_min
+        spikes = spikes(:, 301:T_min);
+        handPos = handPos(1:2, 301:T_min); % Only take X and Y
+
+        % Convolve each neuron's spike train with Gaussian kernel
+        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+
+        % Downsample to 20ms bins
+        num_bins = floor((T_min - 300) / bin_size);
+        firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+
+        for bin = 1:num_bins
+            idx_start = (bin - 1) * bin_size + 1;
+            idx_end = bin * bin_size;
+            firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
+        end
+
+        % Flatten firing rate matrix into a feature vector
+        feature_vector = reshape(firing_rates, [], 1)'; % (98*num_bins) x 1
+
+        % Store the data
+        X_data = [X_data; feature_vector]; % Feature matrix
+        Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
+    end
+end
+X_data = X_data*1000;
+%% Preprocess Data - no padding
+num_trials = size(trial,1);
+num_angles = size(trial,2);
+num_neurons = size(trial(1,1).spikes,1);
+
+% Find the minimum time length across all trials (for truncation)
+T_min = inf; % Initialize with a large value
+for angle = 1:num_angles
+    for t = 1:num_trials
+        T_min = min(T_min, size(trial(t, angle).spikes, 2));
+    end
+end
 
 % Define parameters
 bin_size = 20; % 20 ms binning
@@ -320,10 +350,10 @@ figure;
 colors = lines(num_clusters); % Automatically generate distinct colors
 
 % Plot each data point in the LDA space, colored by cluster assignment
-hold on
 for k = 1:num_clusters
     cluster_points = X_lda(cluster_idx == k, :);
     scatter3(cluster_points(:, 1), cluster_points(:, 2),cluster_points(:,3), 50, 'MarkerFaceColor', colors(k, :), 'MarkerEdgeColor', 'k');
+    hold on
 end
 
 xlabel('LDA Component 1');
@@ -371,9 +401,6 @@ for angle = 1:num_angles
     end
 end
 
-% Initialize matrices for spike trains and hand trajectories
-X_data = [];
-Y_data = [];
 
 % Define parameters
 bin_size = 20; % 20 ms binning
@@ -483,41 +510,9 @@ for i = 1:size(X_lda, 1)
     [~, predicted_labels(i)] = min(distances);
 end
 
-%% Perform K-means clustering manually (without using kmeans function or pdist2)
-num_clusters = 8;
-max_iter = 1000;
-tol = 1e-8;
-reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
-centroids = X_lda(randperm(size(X_lda, 1), num_clusters), :);
+%%
 
-for iter = 1:max_iter
-    distances = zeros(size(X_lda, 1), num_clusters);
-    for k = 1:num_clusters
-        distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
-    end
-    [~, cluster_idx] = min(distances, [], 2);
 
-    prev_centroids = centroids;
-    
-    for k = 1:num_clusters
-        centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
-    end
-    
-    if norm(centroids - prev_centroids) < tol
-        break;
-    end
-end
-
-cluster_centers = centroids;
-cluster_angle_mapping = zeros(num_clusters, 1);
-
-for k = 1:num_clusters
-    cluster_trials = find(cluster_idx == k);
-    cluster_predicted_labels = predicted_labels(cluster_trials);
-    most_common_angle = mode(cluster_predicted_labels);
-    cluster_angle_mapping(k) = reach_angles(most_common_angle);
-
-end
 
 %% Step 1: Train PCR Model (All Trials & Angles)
 % Solve for regression weights using least squares

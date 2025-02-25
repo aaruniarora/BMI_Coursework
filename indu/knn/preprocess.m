@@ -6,16 +6,16 @@ num = 80;
 trainingData = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 trial = trainingData; % Remaining trials for testing
-%% Preprocess Data
+%% Preprocess Data - padding for handpos and spikes
 num_trials = size(trial,1);
 num_angles = size(trial,2);
 num_neurons = size(trial(1,1).spikes,1);
 
-% Find the minimum time length across all trials (for truncation)
-T_min = inf; % Initialize with a large value
+% Find the maximum time length across all trials
+T_max = -inf; % Initialize with a small value
 for angle = 1:num_angles
     for t = 1:num_trials
-        T_min = min(T_min, size(trial(t, angle).spikes, 2));
+        T_max = max(T_max, size(trial(t, angle).spikes, 2));
     end
 end
 
@@ -33,15 +33,29 @@ for angle = 1:num_angles
         spikes = trial(t, angle).spikes;   % 98 x T binary matrix
         handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
 
-        % Truncate to match T_min
-        spikes = spikes(:, 301:T_min);
-        handPos = handPos(1:2, 301:T_min); % Only take X and Y
+        % Determine the current length
+        T_current = size(spikes, 2);
+
+        % Pad spikes with zeros if shorter than T_max
+        if T_current < T_max
+            spikes = [spikes, zeros(size(spikes, 1), T_max - T_current)];
+        end
+
+        % Pad handPos with the last available position if shorter than T_max
+        if T_current < T_max
+            last_pos = handPos(:, end);
+            handPos = [handPos, repmat(last_pos, 1, T_max - T_current)];
+        end
+
+        % Truncate from 301:T_max
+        spikes = spikes(:, 301:T_max);
+        handPos = handPos(1:2, 301:T_max); % Only take X and Y
 
         % Convolve each neuron's spike train with Gaussian kernel
-        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
 
         % Downsample to 20ms bins
-        num_bins = floor((T_min - 300) / bin_size);
+        num_bins = floor((T_max - 300) / bin_size);
         firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
 
         for bin = 1:num_bins
@@ -58,7 +72,61 @@ for angle = 1:num_angles
         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
     end
 end
-X_data = X_data*1000;
+X_data = X_data * 1000; % Scale firing rates
+
+%% Preprocess Data - no padding
+% num_trials = size(trial,1);
+% num_angles = size(trial,2);
+% num_neurons = size(trial(1,1).spikes,1);
+% 
+% % Find the minimum time length across all trials (for truncation)
+% T_min = inf; % Initialize with a large value
+% for angle = 1:num_angles
+%     for t = 1:num_trials
+%         T_min = min(T_min, size(trial(t, angle).spikes, 2));
+%     end
+% end
+% 
+% % Define parameters
+% bin_size = 20; % 20 ms binning
+% sigma = 20; % Standard deviation of Gaussian window (in ms)
+% window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
+% 
+% X_data = []; % Initialize feature matrix
+% Y_data = []; % Initialize labels (hand positions)
+% 
+% for angle = 1:num_angles
+%     for t = 1:num_trials
+%         % Extract spike train and corresponding hand positions
+%         spikes = trial(t, angle).spikes;   % 98 x T binary matrix
+%         handPos = trial(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
+% 
+%         % Truncate to match T_min
+%         spikes = spikes(:, 301:T_min);
+%         handPos = handPos(1:2, 301:T_min); % Only take X and Y
+% 
+%         % Convolve each neuron's spike train with Gaussian kernel
+%         smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+% 
+%         % Downsample to 20ms bins
+%         num_bins = floor((T_min - 300) / bin_size);
+%         firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+% 
+%         for bin = 1:num_bins
+%             idx_start = (bin - 1) * bin_size + 1;
+%             idx_end = bin * bin_size;
+%             firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
+%         end
+% 
+%         % Flatten firing rate matrix into a feature vector
+%         feature_vector = reshape(firing_rates, [], 1)'; % (98*num_bins) x 1
+% 
+%         % Store the data
+%         X_data = [X_data; feature_vector]; % Feature matrix
+%         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
+%     end
+% end
+% X_data = X_data*1000;
 
 %% Apply PCA Using Singular Value Decomposition (SVD)
 % Normalize data before SVD
