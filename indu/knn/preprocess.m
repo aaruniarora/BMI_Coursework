@@ -10,6 +10,8 @@ trial = trainingData; % Remaining trials for testing
 num_trials = size(trial,1);
 num_angles = size(trial,2);
 num_neurons = size(trial(1,1).spikes,1);
+start = 301;
+end_remove = 100;
 
 % Find the maximum time length across all trials
 T_max = -inf; % Initialize with a small value
@@ -18,6 +20,8 @@ for angle = 1:num_angles
         T_max = max(T_max, size(trial(t, angle).spikes, 2));
     end
 end
+
+T_max = T_max - end_remove;
 
 % Define parameters
 bin_size = 20; % 20 ms binning
@@ -55,7 +59,7 @@ for angle = 1:num_angles
         smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
 
         % Downsample to 20ms bins
-        num_bins = floor((T_max - 300) / bin_size);
+        num_bins = floor((T_max - ((start -1)+end_remove)) / bin_size);
         firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
 
         for bin = 1:num_bins
@@ -401,21 +405,26 @@ end
 % Compute accuracy
 accuracy = correct_count / length(angle_labels);
 disp(['Overall cluster-to-angle mapping accuracy: ' num2str(accuracy*100) '%']);
-
+%%
+%SHOULD BE IN OTHER FUNCTION NOW
 %% Preprocess Data
 trial2 = testData;
 num_trials = size(trial2, 1);
 num_angles = size(trial2, 2);
 num_neurons = size(trial2(1, 1).spikes, 1);
 
-% Find the minimum time length across all trials (for truncation)
-T_min = inf; % Initialize with a large value
+start = 301;
+end_remove = 100;
+
+% Find the maximum time length across all trials
+T_max = -inf; % Initialize with a small value
 for angle = 1:num_angles
     for t = 1:num_trials
-        T_min = min(T_min, size(trial(t, angle).spikes, 2));
+        T_max = max(T_max, size(trial2(t, angle).spikes, 2));
     end
 end
 
+T_max = T_max - end_remove;
 
 % Define parameters
 bin_size = 20; % 20 ms binning
@@ -431,15 +440,29 @@ for angle = 1:num_angles
         spikes = trial2(t, angle).spikes;   % 98 x T binary matrix
         handPos = trial2(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
 
-        % Truncate to match T_min
-        spikes = spikes(:, 301:T_min);
-        handPos = handPos(1:2, 301:T_min); % Only take X and Y
+        % Determine the current length
+        T_current = size(spikes, 2);
+
+        % Pad spikes with zeros if shorter than T_max
+        if T_current < T_max
+            spikes = [spikes, zeros(size(spikes, 1), T_max - T_current)];
+        end
+
+        % Pad handPos with the last available position if shorter than T_max
+        if T_current < T_max
+            last_pos = handPos(:, end);
+            handPos = [handPos, repmat(last_pos, 1, T_max - T_current)];
+        end
+
+        % Truncate from 301:T_max
+        spikes = spikes(:, 301:T_max);
+        handPos = handPos(1:2, 301:T_max); % Only take X and Y
 
         % Convolve each neuron's spike train with Gaussian kernel
-        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_min
+        smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
 
         % Downsample to 20ms bins
-        num_bins = floor((T_min - 300) / bin_size);
+        num_bins = floor((T_max - ((start -1)+end_remove)) / bin_size);
         firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
 
         for bin = 1:num_bins
@@ -456,7 +479,8 @@ for angle = 1:num_angles
         Y_data = [Y_data; reshape(handPos, 1, [])]; % Flatten trajectory
     end
 end
-X_data = X_data*1000;
+X_data = X_data * 1000; % Scale firing rates
+
 
 %% Apply PCA Using Singular Value Decomposition (SVD)
 X_mean = mean(X_data, 1);
