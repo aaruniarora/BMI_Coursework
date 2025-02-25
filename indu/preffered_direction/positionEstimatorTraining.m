@@ -17,7 +17,6 @@ function [modelParameters, firingData] = positionEstimatorTraining(trainingData,
     cropped_data = crop_data(trainingData);
     %assignin('base', 'td_temp', cropped_data);
 
-    group = 20;
     window = 20;
     no_train = length(trainingData);
     reach_angles = [1/6,7/18,11/18,15/18,19/18,23/18,31/18,35/18].*pi;
