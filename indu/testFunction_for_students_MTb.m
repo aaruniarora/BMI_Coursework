@@ -15,8 +15,9 @@ ix = randperm(length(trial));
 addpath(teamName);
 
 % Select training and testing data (you can choose to split your data in a different way if you wish)
-trainingData = trial(ix(1:80),:);
-testData = trial(ix(81:end),:);
+trainingData = trial(ix(1:50),:);
+% testData = trial(ix(51:end),:);
+testData = trial(ix(94:end),:);
 
 fprintf('Testing the continuous position estimator...')
 
@@ -30,6 +31,7 @@ grid
 
 % Train Model
 modelParameters = positionEstimatorTraining(trainingData);
+disp('done')
 
 for tr=1:size(testData,1)
     display(['Decoding block ',num2str(tr),' out of ',num2str(size(testData,1))]);
