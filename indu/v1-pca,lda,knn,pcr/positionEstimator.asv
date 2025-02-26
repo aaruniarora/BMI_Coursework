@@ -1,3 +1,4 @@
+%function [x, y, modelParameters] = positionEstimator(past_current_trial, modelParameters)
 clc
 clear all
 
@@ -6,12 +7,12 @@ num = 80;
 training_data = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 %%
-num_trials = size(training_data,1);
-num_angles = size(training_data,2);
-[X_data,Y_data] = preprocessing(training_data,num_trials,num_angles);
+num_trials = size(testData,1);
+num_angles = size(testData,2);
+[X_data,Y_data] = preprocessing(testData,num_trials,num_angles);
 [d_reduced,coeff_hand,num_PC] = applyPCA(X_data);
 [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC);
-[cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(lda_component,predicted_labels,angle_labels);
+%[cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(lda_component,predicted_labels,angle_labels);
 
 %classifying handpos
 % Assume Y_data is of size (num_trials * num_angles, T_max)
@@ -311,13 +312,30 @@ for i = 1:length(angle_labels)
 end
 end
 
-
-
-%%
-
-% % Step 1: Standardize the data (zero mean, unit variance)
-% Y_mean = mean(Y_data, 1);  
-% Y_std = std(Y_data, 0, 1);
-% Y_data_scaled = (Y_data - Y_mean) ./ Y_std;
-
+function predicted_direction = predict_direction(lda_component_test, cluster_centroids, cluster_angle_mapping)
+    % This function predicts the reaching direction for a new test data point
+    % lda_component_test: The reduced test data (one or more data points in LDA space)
+    % cluster_centroids: Centroids of the clusters from K-means
+    % cluster_angle_mapping: The angle mapping for each cluster (the most common angle for each cluster)
+    
+    % Number of clusters
+    num_clusters = size(cluster_centroids, 1);
+    
+    % Compute the Euclidean distance from the test data to each centroid
+    distances = zeros(size(lda_component_test, 1), num_clusters);
+    
+    % Calculate the Euclidean distance to each centroid
+    for k = 1:num_clusters
+        distances(:, k) = sqrt(sum((lda_component_test - cluster_centroids(k, :)).^2, 2)); % Distance to centroid k
+    end
+    
+    % Find the closest centroid (smallest distance)
+    [~, predicted_cluster_idx] = min(distances, [], 2);  % Find the index of the closest centroid
+    
+    % Map the predicted cluster index to the corresponding angle using the cluster_angle_mapping
+    predicted_direction = cluster_angle_mapping(predicted_cluster_idx);  % Predicted direction in radians
+    
+    % If you want to display it as a human-readable angle, you can convert it to degrees:
+    % predicted_direction_deg = rad2deg(predicted_direction);  % Convert to degrees if needed
+end
 

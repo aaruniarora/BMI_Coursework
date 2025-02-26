@@ -6,28 +6,87 @@ num = 80;
 training_data = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 %%
+model_params = struct;
 num_trials = size(training_data,1);
 num_angles = size(training_data,2);
+
 [X_data,Y_data] = preprocessing(training_data,num_trials,num_angles);
-[d_reduced,coeff_hand,num_PC] = applyPCA(X_data);
-[lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC);
+model_params.firing_data = X_data;
+
+[d_reduced,coeff_hand,num_PC,V_hand] = applyPCA(X_data);
+model_params.num_PC = num_PC;
+model_params.coeff_hand = coeff_hand;
+model_params.V_hand = V_hand;
+
+[lda_component,predicted_labels,angle_labels,lda_no] = applyLDA(d_reduced,num_trials,num_angles,num_PC);
+model_params.lda_no = lda_no;
+
 [cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(lda_component,predicted_labels,angle_labels);
+model_params.cluster_idx = cluster_idx;
+model_params.centroids = cluster_centroids;
+model_params.cluster_angle_mapping = cluster_angle_mapping;
+model_params.reach_angles = reach_angles;
 
-%classifying handpos
-% Assume Y_data is of size (num_trials * num_angles, T_max)
-% Assume position_data is of size (num_trials * num_angles, 2) for (x, y) positions
+[B_combined] = regression(Y_data,d_reduced,num_angles,num_trials);
+model_params.pcr_b = B_combined;
 
-% Assuming Y_data has size (2 * num_samples, T_max)
-x_data = Y_data(1:2:end, :);  % Extract odd rows (x-coordinates)
-y_data = Y_data(2:2:end, :);  % Extract even rows (y-coordinates)
+%%
+function [B_combined] = regression(Y_data, d_reduced, num_angles, num_trials)
+    % Y_data: Position data, size (2 * num_samples, T_max)
+    % d_reduced: PCA-reduced data, size (num_trials, num_pcs)
 
-% Apply PCA separately to neural activity for x and y
-[x_pca,coeffx,num_PC_x] = applyPCA(x_data);
-[y_pca,coeffy,num_PC_y] = applyPCA(y_data);
+    % Extract x and y position data
+    x_data = Y_data(1:2:end, :);  % Extract x-coordinates (odd rows)
+    y_data = Y_data(2:2:end, :);  % Extract y-coordinates (even rows)
 
-% Train separate linear models for X and Y
-B_x = (x_pca' * x_pca) \ (x_pca' * x_data);  % Regression for X positions
-B_y = (y_pca' * y_pca) \ (y_pca' * y_data);  % Regression for Y positions
+    model_params.regression = struct;
+
+    num_trials_per_angle = num_trials / num_angles;  % Number of trials for each angle
+    
+    for i = 1:num_angles
+        % Extract the PCA components for the current angle
+        % Each angle corresponds to num_trials_per_angle rows in d_reduced
+        start_idx = (i-1) * num_trials_per_angle + 1;
+        end_idx = i * num_trials_per_angle;
+        
+        W_dir = d_reduced(start_idx:end_idx, :)';  % Transpose for consistency (num_pcs x num_trials_per_angle)
+        size(W_dir)
+        % Get position data for the current time point (all time points)
+        x4pcr = x_data(:);  % x-position data (all time points)
+        y4pcr = y_data(:);  % y-position data (all time points)
+
+        % Center the position data (optional, if needed)
+        mean_x = mean(x4pcr);
+        mean_y = mean(y4pcr);
+
+        % Define Gaussian filter parameters
+        filterWindow = 15;      % Window length (number of samples)
+        sigma = 100;            % Standard deviation for Gaussian
+        x_axis = -floor(filterWindow/2):floor(filterWindow/2);
+        gaussKernel = exp(-x_axis.^2/(2*sigma^2));
+        gaussKernel = gaussKernel / sum(gaussKernel);  % Normalize
+        
+        % Apply Gaussian filter to smooth the position data
+        x4pcr = conv(x4pcr - mean_x, gaussKernel, 'same');
+        y4pcr = conv(y4pcr - mean_y, gaussKernel, 'same');
+
+        % Train linear regression models using least squares
+        beta_x = W_dir \ x4pcr;  % Solve for beta (weights) for x position
+        beta_y = W_dir \ y4pcr;  % Solve for beta (weights) for y position
+        
+        % Store regression parameters for the current direction (angle)
+        model_params.regression(i).beta_x = beta_x;
+        model_params.regression(i).beta_y = beta_y;
+        model_params.regression(i).mean_x = mean_x;
+        model_params.regression(i).mean_y = mean_y;
+    end
+
+    % Combine beta_x and beta_y into one matrix (as requested)
+    B_combined = struct;
+    B_combined.beta_x = beta_x;
+    B_combined.beta_y = beta_y;
+end
+
 
 
 %% Preprocess Data - padding for handpos and spikes
@@ -101,7 +160,7 @@ end
 X_data = X_data * 1000; % Scale firing rates
 end
 %% 
-function [d_reduced,coeff,num_PC] = applyPCA(data)
+function [d_reduced,coeff,num_PC,V] = applyPCA(data)
 d_mean = mean(data, 1);
 d_norm = data - d_mean; % Center data (zero mean)
 
@@ -122,7 +181,7 @@ coeff = V(:,1:num_PC);
 d_reduced = d_norm * V(:,1:num_PC); % Project onto principal components
 end
 %%
-function [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC)
+function [lda_component,predicted_labels,angle_labels,num_LDA_components] = applyLDA(d_reduced,num_trials,num_angles,num_PC)
 %Manual LDA Implementation
 % Define class labels (use angles as class labels)
 angle_labels = repmat(1:num_angles, num_trials, 1);
