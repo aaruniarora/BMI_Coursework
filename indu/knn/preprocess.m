@@ -294,53 +294,6 @@ end
 cluster_centers = centroids;
 
 %%
-
-% %% Classify using Nearest Mean Classifier
-% class_means = zeros(num_angles, num_LDA_components);
-% for i = 1:num_angles
-%     class_means(i, :) = mean(X_lda(angle_labels == i, :), 1);
-% end
-% predicted_labels = zeros(size(X_lda, 1), 1);
-% for i = 1:size(X_lda, 1)
-%     distances = vecnorm(X_lda(i, :) - class_means, 2, 2);
-%     [~, predicted_labels(i)] = min(distances);
-% end
-% num_clusters = 8;
-% max_iter = 1000;
-% tol = 1e-8;
-% reach_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] * pi;
-% % Initialize centroids by selecting the closest points to each angle
-% centroids = zeros(num_clusters, size(X_lda, 2));
-% for k = 1:num_clusters
-%     angle_diffs = abs(predicted_labels - k); % Find points closest to each angle cluster
-%     [~, min_idx] = min(angle_diffs);
-%     centroids(k, :) = X_lda(min_idx, :);
-% end
-% for iter = 1:max_iter
-%     distances = zeros(size(X_lda, 1), num_clusters);
-%     for k = 1:num_clusters
-%         distances(:, k) = sqrt(sum((X_lda - centroids(k, :)).^2, 2));
-%     end
-%     [~, cluster_idx] = min(distances, [], 2);
-%     prev_centroids = centroids;
-% 
-%     for k = 1:num_clusters
-%         centroids(k, :) = mean(X_lda(cluster_idx == k, :), 1);
-%     end
-% 
-%     if norm(centroids - prev_centroids) < tol
-%         break;
-%     end
-% end
-% cluster_centers = centroids;
-% cluster_angle_mapping = zeros(num_clusters, 1);
-% for k = 1:num_clusters
-%     cluster_trials = find(cluster_idx == k);
-%     cluster_predicted_labels = predicted_labels(cluster_trials);
-%     most_common_angle = mode(cluster_predicted_labels);
-%     cluster_angle_mapping(k) = reach_angles(most_common_angle);
-% end
-%%
 % Map clusters to reaching angles
 cluster_angle_mapping = zeros(num_clusters, 1);
 
