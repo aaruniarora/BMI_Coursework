@@ -8,6 +8,15 @@
 % testData = trial(num+1:end, :);  
 function [x, y, modelParameters] = positionEstimator(testData, modelParameters)
 %%
+if modelParameters.trial_id == 0
+    modelParameters.trial_id = testData.trialId;
+else 
+    if modelParameters.trial_id ~= testData.trialId
+        modelParameters.iterations = 0;
+        modelParameters.trial_id = testData.trialId;
+    end
+end
+modelParameters.iterations = modelParameters.iterations + 1;
 bin_size = modelParameters.bin_size;
 [X_new_processed] = preprocessing(testData,bin_size);
 
@@ -53,6 +62,7 @@ cluster_angle_mapping = modelParameters.cluster_angle_mapping;
 
 % Step 6: Map the predicted cluster index back to the corresponding reach angle
 predicted_reach_angle = modelParameters.cluster_angle_mapping(predicted_cluster_idx);
+modelParameters.prev_angle = predicted_reach_angle;
 
 % Display the predicted reach angle
 %disp('Predicted Reach Angle:');
@@ -62,14 +72,19 @@ reach_angles = modelParameters.reach_angles;
 
 beta_x_all = modelParameters.b_x;
 beta_y_all = modelParameters.b_y;
-mean_X = modelParameters.meanX;
 unique_angles = modelParameters.unique_angles;
 
-mean_X_positions = modelParameters.meanx_pos;
-mean_Y_positions = modelParameters.meany_pos;
+mean_X_pos= modelParameters.meanx_pos;
+mean_Y_pos = modelParameters.meany_pos;
 
-[x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_reach_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X, mean_X_positions, mean_Y_positions);
-
+if modelParameters.iterations == 1
+    x = testData.startHandPos(1);
+    y = testData.startHandPos(2);
+elseif modelParameters.iterations > 1
+[x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_reach_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
+elseif modelParameters.iterations > 5
+[x,y] = predictHandPositionByAngleXY(d_reduced_new,modelParameters.prev_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
+end
 %% Preprocess Data - padding for handpos and spikes
 function [X_data] = preprocessing(t_data,bin_size)
 start = 301;
@@ -134,7 +149,7 @@ function predicted_direction = predict_direction(lda_component_test, cluster_cen
     % predicted_direction_deg = rad2deg(predicted_direction);  % Convert to degrees if needed
 end
 %%
-    function [x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, beta_x_all, beta_y_all,cluster_angle_mapping, mean_X,mean_X_positions, mean_Y_positions)
+    function [x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, beta_x_all, beta_y_all,cluster_angle_mapping,mean_X_pos, mean_Y_pos)
     % Find which model to use based on the predicted angle
     angle_idx = find(cluster_angle_mapping == predicted_angle, 1);
     
@@ -147,11 +162,12 @@ end
     beta_y = beta_y_all{angle_idx};
 
     % Center the new data by subtracting the training mean
-    X_new = d_reduced_new - mean_X(:,1:length(d_reduced_new));
+    % X_new = d_reduced_new - mean_X(:,1:length(d_reduced_new));
+    X_new = d_reduced_new;
     
     % Predict X and Y positions separately (No Bias Term)
-    x = (X_new * beta_x)+mean_X_positions;
-    y = (X_new * beta_y) + mean_Y_positions;
+    x = (X_new * beta_x) + mean_X_pos{angle_idx};
+    y = (X_new * beta_y) + mean_Y_pos{angle_idx};
 end
 
 end

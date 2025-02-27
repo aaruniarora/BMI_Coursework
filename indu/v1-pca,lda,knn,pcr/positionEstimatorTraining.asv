@@ -7,6 +7,7 @@
 % testData = trial(num+1:end, :);  
 function [model_params, firing_data] = positionEstimatorTraining(training_data)
 %%
+clc
 model_params = struct;
 num_trials = size(training_data,1);
 num_angles = size(training_data,2);
@@ -27,30 +28,22 @@ lda_no = 3;
 [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC,lda_no);
 model_params.lda_no = lda_no;
 model_params.lda_component = lda_component;
-size(angle_labels)
 
 [cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(lda_component,predicted_labels,angle_labels);
 model_params.cluster_idx = cluster_idx;
 model_params.centroids = cluster_centroids;
 model_params.cluster_angle_mapping = cluster_angle_mapping;
 model_params.reach_angles = reach_angles;
-% 
-% [B_combined] = regression(Y_data,d_reduced,num_angles,num_trials);
-% model_params.regression = B_combined;
 
-[beta_x_all, beta_y_all, unique_angles, mean_X,mean_X_positions, mean_Y_positions] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels);
+[beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels,num_trials);
 model_params.b_x = beta_x_all;
 model_params.b_y = beta_y_all;
 model_params.meanX = mean_X;
 model_params.unique_angles = unique_angles;
-model_params.meanx_pos = mean_X_positions;
-model_params.meany_pos = mean_Y_positions;
+model_params.meanx_pos = mean_x;
+model_params.meany_pos = mean_y;
 %%
-function [B_combined] = regression(Y_data, d_reduced, num_angles, num_trials)
-B_combined = randi([5, 15], 1, 2);
-end
-%%
-function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_X_positions, mean_Y_positions] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels)
+function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels,num_trials)
     unique_angles = unique(angle_labels); % Find all unique angles
     num_angles = length(unique_angles);
     
@@ -61,29 +54,40 @@ function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_X_positions, mean_Y
     mean_X = mean(d_reduced, 1); % Compute mean across trials (row-wise)
     
     % Center the data (subtract mean)
-    d_reduced_centered = d_reduced - mean_X;
+    % d_reduced_centered = d_reduced - mean_X;
+
+    mean_x = cell(num_angles, 1);
+    mean_y = cell(num_angles, 1);
+
+    angles = 1:8;  % The unique angle labels
+    angle_labels_e = repelem(angles,num_trials*2) % Repeat each number 4 times
     
     for i = 1:num_angles
         % Extract trials corresponding to this angle
         angle_idx = (angle_labels == unique_angles(i));
+        angle_idx_e = (angle_labels_e == unique_angles(i));
         
-        X = d_reduced_centered(angle_idx, :); % Use centered data
+        X = d_reduced(angle_idx, :); % Use centered data
+
+        % size(Y_data)
         
         % Extract the corresponding hand positions
-        Y_selected = Y_data(angle_idx, :); % This has shape (num_trials × 2)
+        Y_selected = Y_data(angle_idx_e, :); % This has shape (num_trials × 2)
 
         % Compute the means for X and Y hand positions
-    mean_X_positions = mean(Y_data(1:2:end, :), 1);  % Mean of X positions (odd rows)
-    mean_Y_positions = mean(Y_data(2:2:end, :), 1);  % Mean of Y positions (even rows)
-    
+        mean_X_a = mean(Y_selected(1:2:end, :), 'all'); % Mean of all X positions
+        mean_Y_a = mean(Y_selected(2:2:end, :), 'all') ; % Mean of all Y positions
         
         % Separate into X and Y coordinates
-        Y_x = Y_selected(:, 1); % Take the first column → X coordinates
-        Y_y = Y_selected(:, 2); % Take the second column → Y coordinates
+        Y_x = Y_selected(1:2:end, :); % Take the first column → X coordinates
+        Y_y = Y_selected(2:2:end, :); % Take the second column → Y coordinates
+        
+        Y_x = Y_x - mean_X_a;
+        Y_y = Y_y - mean_Y_a;
 
         % Ensure column vectors for correct matrix multiplication
-        Y_x = Y_x(:);
-        Y_y = Y_y(:);
+        % Y_x = Y_x(:);
+        % Y_y = Y_y(:);
         
         % Debugging: Print sizes (optional)
         % size(X)
@@ -93,6 +97,8 @@ function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_X_positions, mean_Y
         % Solve for beta_x and beta_y using normal equation (No Bias Term)
         beta_x_all{i} = (X' * X) \ (X' * Y_x);
         beta_y_all{i} = (X' * X) \ (X' * Y_y);
+        mean_x{i} = mean_X_a;
+        mean_y{i} = mean_Y_a;
     end
 end
 
@@ -238,30 +244,31 @@ function [score, coeff] = covPCA(X, numPC)
     coeff = V(:, 1:numPC);
     score = Xc * coeff;
     % Normalize each principal component (each column) to have unit norm
-    normFactors = sqrt(sum(score.^2, 1));  % 1 x nPC vector, norm of each column
-    score = score ./ repmat(normFactors, size(score, 1), 1);
+    % normFactors = sqrt(sum(score.^2, 1));  % 1 x nPC vector, norm of each column
+    % score = score ./ repmat(normFactors, size(score, 1), 1);
 end
 %%
-function [d_reduced,coeff,num_PC,V] = applyPCA(data)
-d_mean = mean(data, 1);
-d_norm = data - d_mean; % Center data (zero mean)
-
-% Compute SVD
-[U, S, V] = svd(d_norm, 'econ');
-
-% Compute variance explained
-singular_values = diag(S);
-explained_variance = (singular_values.^2) / sum(singular_values.^2);
-cum_variance = cumsum(explained_variance);
-
-% Choose number of principal components to retain 95% variance
-variance_threshold = 0.95;
-num_PC = find(cum_variance >= variance_threshold, 1);
-
-% Reduce data dimensionality
-coeff = V(:,1:num_PC);
-d_reduced = d_norm * V(:,1:num_PC); % Project onto principal components
-end
+% %%
+% function [d_reduced,coeff,num_PC,V] = applyPCA(data)
+% d_mean = mean(data, 1);
+% d_norm = data - d_mean; % Center data (zero mean)
+% 
+% % Compute SVD
+% [U, S, V] = svd(d_norm, 'econ');
+% 
+% % Compute variance explained
+% singular_values = diag(S);
+% explained_variance = (singular_values.^2) / sum(singular_values.^2);
+% cum_variance = cumsum(explained_variance);
+% 
+% % Choose number of principal components to retain 95% variance
+% variance_threshold = 0.95;
+% num_PC = find(cum_variance >= variance_threshold, 1);
+% 
+% % Reduce data dimensionality
+% coeff = V(:,1:num_PC);
+% d_reduced = d_norm * V(:,1:num_PC); % Project onto principal components
+% end
 %%
     function [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC,lda_no)
 %Manual LDA Implementation
@@ -461,4 +468,4 @@ end
 % Y_data_scaled = (Y_data - Y_mean) ./ Y_std;
 
 
- end
+ %end
