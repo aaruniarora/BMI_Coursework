@@ -18,6 +18,10 @@ function modelParameters = positionEstimatorTraining(training_data)
     % the modelParameters structure.
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    %% Parameters
+    noDirections = 8;
+    reaching_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23,18, 31/18, 35/18] .* pi;
+
     %% 1. Preprocessing: Trim and pad trials
     [preprocTrials, padLength] = preprocessTrials(training_data);
     modelParameters.padLength = padLength;
@@ -41,8 +45,11 @@ function modelParameters = positionEstimatorTraining(training_data)
     [featuresMatrix, handPosMatrix, labels] = extractFeaturesAndLabels(binnedTrials);
     
     %% 5. PCA on the features
-    variance_threshold = 0.95; % Choose number of principal components to retain 95% variance
-    [coeff, score, mu, nPC] = performPCA(featuresMatrix, variance_threshold);
+    nPC = 10;
+    [coeff, score, mu] = cov_PCA(featuresMatrix, nPC);
+    % [coeff, score, mu] = getPCA(featuresMatrix', nPC);
+    % variance_threshold = 0.95; % Choose number of principal components to retain 95% variance
+    % [coeff, score, mu, nPC] = svd_PCA(featuresMatrix, variance_threshold);
     modelParameters.PCA.mu = mu;
     modelParameters.PCA.coeff = coeff;
     modelParameters.PCA.nPC = nPC;
@@ -78,11 +85,11 @@ function [preprocTrials, padLength] = preprocessTrials(trials)
     [numRows, numCols] = size(trials);
     padLength = 0;
     preprocTrials = trials;
+    startIdx = 301;
     for i = 1:numRows
         for j = 1:numCols
             trial = trials(i,j);
             T = size(trial.spikes,2);
-            startIdx = 301;
             endIdx = T - 100;
             if endIdx < startIdx
                 error('Trial too short after removal.');
@@ -91,7 +98,7 @@ function [preprocTrials, padLength] = preprocessTrials(trials)
             trial.handPos = trial.handPos(:, startIdx:endIdx);
             currentLen = size(trial.spikes,2);
             if currentLen > padLength
-                padLength = currentLen;
+                padLength = currentLen; % to get the largest trial size
             end
             preprocTrials(i,j) = trial;
         end
@@ -188,24 +195,63 @@ function [featuresMatrix, handPosMatrix, labels] = extractFeaturesAndLabels(tria
     labels = labelList;
 end
 
-% function [coeff, score, mu] = performPCA(X, nPC)
-%     % Compute PCA: center the data, get covariance, then the top nPC eigenvectors.
-%     mu = mean(X,1);
-%     Xc = X - mu;
-%     C = cov(Xc);
-%     [V, D] = eig(C);
-%     [d, idx] = sort(diag(D), 'descend');
-%     V = V(:, idx);
-%     coeff = V(:, 1:nPC);
-%     score = Xc * coeff;
-% end
+function [ev, prinComp, mu] = getPCA(data, nPC)
+    % Perform Principal Component Analysis (PCA) on the data.
+    % Inputs:
+    %   data - matrix of firing rates (neurons x time/trials)
+    %
+    % Outputs:
+    %   prinComp - projection of data onto principal components
+    %   evals    - eigenvalues (sorted in descending order)
+    %   sortIdx  - indices used for sorting eigenvalues
+    %   ev       - eigenvectors corresponding to eigenvalues
+    %
+    % Subtract the cross-trial mean
+    mu = mean(data, 2);
+    dataCT = data - mu;
+    % Calculate covariance matrix
+    covMat = dataCT' * dataCT / size(data, 2);
+    % Get eigenvalues and eigenvectors
+    [evects, evalsMat] = eig(covMat);
+    % Sort eigenvalues and eigenvectors in descending order
+    [~, sortIdx] = sort(diag(evalsMat), 'descend');
+    evects = evects(:, sortIdx);
+    % Return eigenvectors as well
+    ev = evects(:, 1:nPC);
+    % Project firing rate data onto the new basis
+    prinComp = dataCT * ev;
+    disp('Before'); size(prinComp)
+    % Normalize
+    prinComp = prinComp ./ sqrt(sum(prinComp.^2));
+    disp('After'); size(prinComp)
+    % Extract sorted eigenvalues
+    evalsDiag = diag(evalsMat);
+    evals = diag(evalsDiag(sortIdx));
+    mu = mu';
+end
 
-function [coeff, score, mu, nPC] = performPCA(X, variance_threshold)
+function [coeff, score, mu] = cov_PCA(X, nPC)
+    % Compute PCA: center the data, get covariance, then the top nPC eigenvectors.
+    mu = mean(X,1);
+    Xc = X - mu;
+    C = cov(Xc);
+    [V, D] = eig(C);
+    [d, idx] = sort(diag(D), 'descend');
+    V = V(:, idx);
+    coeff = V(:, 1:nPC);
+    score = Xc * coeff;
+
+    % Normalize each principal component (each column) to have unit norm
+    % normFactors = sqrt(sum(score.^2, 1));  % 1 x nPC vector, norm of each column
+    % score = score ./ repmat(normFactors, size(score, 1), 1);
+end
+
+function [coeff, score, mu, nPC] = svd_PCA(X, variance_threshold)
     % Compute PCA using Singular Value Decomposition (SVD)
     % Center the data by subtracting the mean from each sample
     mu = mean(X, 1);
     Xc = X - mu;
-    
+
     % Perform SVD on the centered data (using economy size decomposition)
     [U, S, V] = svd(Xc, 'econ');
 
@@ -213,12 +259,12 @@ function [coeff, score, mu, nPC] = performPCA(X, variance_threshold)
     singular_values = diag(S);
     explained_variance = (singular_values.^2) / sum(singular_values.^2);
     cum_variance = cumsum(explained_variance);
-    
+
     nPC = find(cum_variance >= variance_threshold, 1);
 
     % The principal component directions are given by the columns of V
     coeff = V(:, 1:nPC);
-    
+
     % Reduce data dimensionality: Compute the projection (scores) of the data onto the principal components
     score = Xc * coeff;
 end
