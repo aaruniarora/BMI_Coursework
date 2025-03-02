@@ -8,6 +8,7 @@
 % testData = trial(num+1:end, :);  
 function [x, y, modelParameters] = positionEstimator(testData, modelParameters)
 %%
+trialDuration = size(testData.spikes, 2);
 if modelParameters.trial_id == 0
     modelParameters.trial_id = testData.trialId;
 else 
@@ -82,7 +83,7 @@ if modelParameters.iterations == 1
     y = testData.startHandPos(2);
 elseif modelParameters.iterations > 1
 [x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_reach_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
-elseif modelParameters.iterations > 5
+elseif modelParameters.iterations > 50
 [x,y] = predictHandPositionByAngleXY(d_reduced_new,modelParameters.prev_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
 end
 %% Preprocess Data - padding for handpos and spikes
@@ -164,10 +165,12 @@ end
     % Center the new data by subtracting the training mean
     % X_new = d_reduced_new - mean_X(:,1:length(d_reduced_new));
     X_new = d_reduced_new;
+
+    size(X_new)
     
     % Predict X and Y positions separately (No Bias Term)
-    x = (X_new * beta_x) + mean_X_pos{angle_idx};
-    y = (X_new * beta_y) + mean_Y_pos{angle_idx};
+    x = (X_new * beta_x);% + mean_X_pos{angle_idx};
+    y = (X_new * beta_y);% + mean_Y_pos{angle_idx};
 end
 
 end

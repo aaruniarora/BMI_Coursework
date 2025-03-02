@@ -1,170 +1,251 @@
-function [x, y, modelParameters] = positionEstimator(past_current_trial, modelParameters)
-    % Parameters
-    noDirections = 8;
-    group = 20;          % Bin size in ms
-    win = 50;            % Gaussian smoothing window in ms
+function [predictedX, predictedY, updatedModelParameters] = positionEstimator(testTrialData, trainedModelParameters)
+% POSITIONESTIMATOR_CONFIDENCE Decodes hand position from spike data using PCR,
+% with a confidence-based update on the classifier output.
+%
+% Inputs:
+%   testTrialData         - Structure containing spike data for the trial.
+%   trainedModelParameters- Structure with model parameters from training.
+%
+% Outputs:
+%   predictedX            - Decoded X position.
+%   predictedY            - Decoded Y position.
+%   updatedModelParameters- (Possibly updated) model parameters.
+
+% Copy the trained model parameters
+updatedModelParameters = trainedModelParameters;
+
+% ----------------------- Initialization -----------------------
+numDirections = 8;       % Number of possible movement directions.
+binSize = 20;            % Binning resolution (ms).
+gaussianScale = 50;      % Scale for the Gaussian kernel.
+targetAngles = [30 70 110 150 190 230 310 350];
+
+% Preprocess the test spike data.
+processedTrial = binAndSqrtSpikes(testTrialData, binSize, true);
+smoothedTrial = computeFiringRates(processedTrial, binSize, gaussianScale);
+
+trialDuration = size(testTrialData.spikes, 2);
+numNeurons = size(smoothedTrial(1,1).rates, 1);
+
+% ------------------ Determine Reaching Direction ------------------
+if trialDuration <= 560
+    timeWindowIndex = (trialDuration/binSize) - (320/binSize) + 1;
     
-    % Preprocess test trial: bin spikes and apply square root transform
-    trialProcess = bin_and_sqrt(past_current_trial, group, 1);
+    removedNeuronIndices = updatedModelParameters.lowFirers{1};
+    smoothedTrial.rates(removedNeuronIndices, :) = [];
+    processedFiringVector = reshape(smoothedTrial.rates, [], 1);
+    numNeurons = numNeurons - length(removedNeuronIndices);
     
-    % Compute firing rates with Gaussian smoothing
-    trialFinal = get_firing_rates(trialProcess, group, win);
+    trainingProjWeights = updatedModelParameters.classify(timeWindowIndex).wLDA_kNN;
+    pcaDimension        = updatedModelParameters.classify(timeWindowIndex).dPCA_kNN;
+    ldaDimension        = updatedModelParameters.classify(timeWindowIndex).dLDA_kNN;
+    optimalProjTrain    = updatedModelParameters.classify(timeWindowIndex).wOpt_kNN;
+    trainingMeanFiring  = updatedModelParameters.classify(timeWindowIndex).mFire_kNN;
     
-    % Reach angles for directions (not used further in this code)
-    reachAngles = [30 70 110 150 190 230 310 350];
+    testProjection = optimalProjTrain' * (processedFiringVector - trainingMeanFiring);
     
-    % Current time in ms
-    T_end = size(past_current_trial.spikes, 2);
-    noNeurons = size(trialFinal(1,1).rates, 1);
-    
-    % Determine time point index and process trial accordingly
-    if T_end <= 560
-        indexer = floor((T_end - 320)/group) + 1;
-        if indexer < 1
-            indexer = 1;
-        elseif indexer > 13
-            indexer = 13;
-        end
-        % Remove low-firing neurons
-        lowFirers = modelParameters.lowFirers{1};
-        trialFinal.rates(lowFirers, :) = [];
-        % Prepare firing data (reshape into a vector)
-        firingData = reshape(trialFinal.rates, [], 1);
-        noNeurons = noNeurons - length(lowFirers);
-        % Get projection parameters from the training model
-        optimOut = modelParameters.classify(indexer).wOpt_kNN;
-        mean_all = modelParameters.classify(indexer).mFire_kNN;
-        % Ensure firingData size matches the model dimensions
-        if size(firingData,1) > size(optimOut,1)
-            firingData = firingData(1:size(optimOut,1));
-        end
-        % Project test data onto the LDA space
-        WTest = optimOut' * (firingData - mean_all);
-        % Classify direction using kNN
-        WTrain = modelParameters.classify(indexer).wLDA_kNN;
-        ldaDim = modelParameters.classify(indexer).dLDA_kNN;
-        outLabel = getKNNs(WTest, WTrain, ldaDim, 8);
-        modelParameters.actualLabel = outLabel;
+    % --- Confidence-Based Classification ---
+    % Call a modified kNN that returns both a predicted label and a confidence measure.
+    [predictedLabel, confidence] = getKNNs_confidence(testProjection, trainingProjWeights, ldaDimension, 8);
+    threshold = 0.5;  % Example confidence threshold.
+    if confidence < threshold
+        % If confidence is low, retain the previously determined direction.
+        predictedLabel = updatedModelParameters.actualLabel;
     else
-        % For T_end > 560 ms, use the last predicted direction
-        outLabel = modelParameters.actualLabel;
-        indexer = 13;  % Corresponds to 560 ms
-        % Remove low-firing neurons
-        lowFirers = modelParameters.lowFirers{1};
-        trialFinal.rates(lowFirers, :) = [];
-        % Prepare firing data
-        firingData = reshape(trialFinal.rates, [], 1);
-        noNeurons = noNeurons - length(lowFirers);
-        % Get projection parameters from the training model
-        optimOut = modelParameters.classify(indexer).wOpt_kNN;
-        mean_all = modelParameters.classify(indexer).mFire_kNN;
-        if size(firingData,1) > size(optimOut,1)
-            firingData = firingData(1:size(optimOut,1));
-        end
-        % Project test data onto the LDA space
-        WTest = optimOut' * (firingData - mean_all);
+        updatedModelParameters.actualLabel = predictedLabel;
     end
-    
-    % Predict position using linear regression parameters stored in the model
-    beta_x = modelParameters.regression(outLabel, indexer).beta_x;
-    beta_y = modelParameters.regression(outLabel, indexer).beta_y;
-    mean_x = modelParameters.regression(outLabel, indexer).mean_x;
-    mean_y = modelParameters.regression(outLabel, indexer).mean_y;
-    
-    % Compute position estimates
-    x = WTest' * beta_x + mean_x;
-    y = WTest' * beta_y + mean_y;
+else
+    predictedLabel = updatedModelParameters.actualLabel;
+    timeWindowIndex = 1;
+    removedNeuronIndices = updatedModelParameters.lowFirers{1};
+    smoothedTrial.rates(removedNeuronIndices, :) = [];
+    processedFiringVector = reshape(smoothedTrial.rates, [], 1);
+    numNeurons = numNeurons - length(removedNeuronIndices);
 end
+
+% ---------------- PCR: Predicting Hand Position ----------------
+if trialDuration <= 560
+    numNeurons = size(smoothedTrial(1,1).rates, 1) - length(removedNeuronIndices);
+    timeWindowIndex = (trialDuration/binSize) - (320/binSize) + 1;
+    
+    averagePosX = updatedModelParameters.averages(timeWindowIndex).avX(:, predictedLabel);
+    averagePosY = updatedModelParameters.averages(timeWindowIndex).avY(:, predictedLabel);
+    meanFiringPCR = updatedModelParameters.pcr(predictedLabel, timeWindowIndex).fMean;
+    regressionCoeffX = updatedModelParameters.pcr(predictedLabel, timeWindowIndex).bx;
+    regressionCoeffY = updatedModelParameters.pcr(predictedLabel, timeWindowIndex).by;
+    
+    predictedX = (processedFiringVector - mean(meanFiringPCR))' * regressionCoeffX + averagePosX;
+    predictedY = (processedFiringVector - mean(meanFiringPCR))' * regressionCoeffY + averagePosY;
+    
+    try
+        predictedX = predictedX(trialDuration, 1);
+        predictedY = predictedY(trialDuration, 1);
+    catch
+        predictedX = predictedX(end, 1);
+        predictedY = predictedY(end, 1);
+    end
+else
+    numNeurons = size(smoothedTrial(1,1).rates, 1) - length(removedNeuronIndices);
+    averagePosX = updatedModelParameters.averages(13).avX(:, predictedLabel);
+    averagePosY = updatedModelParameters.averages(13).avY(:, predictedLabel);
+    meanFiringPCR = updatedModelParameters.pcr(predictedLabel, 13).fMean;
+    regressionCoeffX = updatedModelParameters.pcr(predictedLabel, 13).bx;
+    regressionCoeffY = updatedModelParameters.pcr(predictedLabel, 13).by;
+    
+    predictedX = (processedFiringVector(1:length(regressionCoeffX)) - mean(processedFiringVector(1:length(regressionCoeffX))))' * regressionCoeffX + averagePosX;
+    predictedY = (processedFiringVector(1:length(regressionCoeffY)) - mean(processedFiringVector(1:length(regressionCoeffY))))' * regressionCoeffY + averagePosY;
+    
+    try
+        predictedX = predictedX(trialDuration, 1);
+        predictedY = predictedY(trialDuration, 1);
+    catch
+        predictedX = predictedX(end, 1);
+        predictedY = predictedY(end, 1);
+    end
+end
+
+end
+
+% --- Modified kNN function returning confidence ---
+function [predictedLabel, confidence] = getKNNs_confidence(testProjection, trainingProjection, ldaDimension, neighborhoodFactor)
+    trainingMatrix = trainingProjection';
+    testingMatrix = testProjection;
+    trainingSquared = sum(trainingMatrix .* trainingMatrix, 2);
+    testingSquared  = sum(testingMatrix .* testingMatrix, 1);
+    
+    % Compute squared Euclidean distances.
+    distanceMatrix = trainingSquared(:, ones(1, length(testingMatrix))) + ...
+                     testingSquared(ones(1, length(trainingMatrix)), :) - ...
+                     2 * trainingMatrix * testingMatrix;
+    distanceMatrix = distanceMatrix';
+    
+    k = 20;  % Fixed number of neighbors.
+    [~, sortedIndices] = sort(distanceMatrix, 2);
+    nearestNeighbors = sortedIndices(:, 1:k);
+    
+    numTrialsPerDirection = size(trainingProjection, 2) / 8;
+    directionLabels = [ones(1, numTrialsPerDirection), 2*ones(1, numTrialsPerDirection), ...
+                       3*ones(1, numTrialsPerDirection), 4*ones(1, numTrialsPerDirection), ...
+                       5*ones(1, numTrialsPerDirection), 6*ones(1, numTrialsPerDirection), ...
+                       7*ones(1, numTrialsPerDirection), 8*ones(1, numTrialsPerDirection)]';
+    nearestLabels = reshape(directionLabels(nearestNeighbors), [], k);
+    
+    % Determine the predicted label as the mode.
+    predictedLabel = mode(mode(nearestLabels, 2));
+    
+    % Calculate confidence as the average fraction of neighbors voting for the predicted label.
+    votes = sum(nearestLabels == predictedLabel, 2);
+    confidence = mean(votes) / k;
+end
+
+% Note: The helper functions (binAndSqrtSpikes, computeFiringRates, getKNNs, etc.) remain unchanged.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Helper Functions
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Local Helper Functions
 
-function trialProcessed = bin_and_sqrt(trial, group, to_sqrt)
-    % Re-bin the spike data to a new resolution and apply square-root transform.
-    % Inputs:
-    %   trial   - struct containing fields 'spikes' (neurons x time)
-    %   group   - new binning resolution (in ms)
-    %   to_sqrt - binary flag; if 1, apply sqrt to binned spikes
-    %
-    % Output:
-    %   trialProcessed - struct with re-binned spikes
-    
-    trialProcessed = struct;
-    for i = 1:size(trial,2)
-        for j = 1:size(trial,1)
-            all_spikes = trial(j,i).spikes;  % neurons x time points
-            no_neurons = size(all_spikes,1);
-            no_points = size(all_spikes,2);
-            t_new = 1:group:(no_points + 1);
-            spikes = zeros(no_neurons, numel(t_new)-1);
-            for k = 1:(numel(t_new)-1)
-                spikes(:, k) = sum(all_spikes(:, t_new(k):t_new(k+1)-1), 2);
+function processedTrials = binAndSqrtSpikes(rawTrialData, binSize, applySqrt)
+% BINANDSQRTSPIKES Re-bins the spike data and applies a square-root transform.
+%   This function converts high-resolution spike data into coarser bins and,
+%   if requested, applies a square-root transformation to reduce the influence
+%   of high-firing neurons.
+%
+%   Inputs:
+%       rawTrialData - Structure containing the original spike data.
+%       binSize      - New binning resolution (in ms).
+%       applySqrt    - Boolean flag to apply square-root transform.
+%
+%   Output:
+%       processedTrials - Structure with binned (and possibly transformed) spikes.
+
+    processedTrials = struct;
+    for col = 1:size(rawTrialData,2)
+        for row = 1:size(rawTrialData,1)
+            spikeMatrix = rawTrialData(row,col).spikes;  % Rows: neurons; Columns: time points
+            [numNeurons, numTimePoints] = size(spikeMatrix);
+            newBinEdges = 1:binSize:(numTimePoints+1);
+            binnedSpikes = zeros(numNeurons, numel(newBinEdges)-1);
+            for binIdx = 1:(numel(newBinEdges)-1)
+                binnedSpikes(:,binIdx) = sum(spikeMatrix(:, newBinEdges(binIdx):newBinEdges(binIdx+1)-1), 2);
             end
-            if to_sqrt
-                spikes = sqrt(spikes);
+            if applySqrt
+                binnedSpikes = sqrt(binnedSpikes);
             end
-            trialProcessed(j,i).spikes = spikes;
+            processedTrials(row,col).spikes = binnedSpikes;
         end
     end
 end
 
-function trialFinal = get_firing_rates(trialProcessed, group, scale_window)
-    % Compute firing rates using Gaussian smoothing.
-    % Inputs:
-    %   trialProcessed - struct output from bin_and_sqrt
-    %   group          - binning resolution (ms)
-    %   scale_window   - scaling parameter for the Gaussian kernel (ms)
-    %
-    % Output:
-    %   trialFinal - struct containing smoothed firing rates in field 'rates'
+function trialsWithRates = computeFiringRates(binnedTrials, binSize, gaussianScale)
+% COMPUTEFIRINGRATES Smooths the binned spike data using a Gaussian kernel.
+%   This function convolves each neuron's binned spike train with a Gaussian
+%   kernel to obtain smoothed firing rates.
+%
+%   Inputs:
+%       binnedTrials - Structure with binned spike data.
+%       binSize      - Binning resolution (ms).
+%       gaussianScale- Scale factor for the Gaussian kernel.
+%
+%   Output:
+%       trialsWithRates - Structure with computed firing rates.
+
+    trialsWithRates = struct;
+    kernelWindowSize = 10 * (gaussianScale / binSize);
+    normalizedStd = gaussianScale / binSize;
+    alphaParam = (kernelWindowSize - 1) / (2 * normalizedStd);
+    timeVector = -(kernelWindowSize-1)/2 : (kernelWindowSize-1)/2;
+    gaussianTemp = exp((-1/2) * (alphaParam * timeVector/((kernelWindowSize-1)/2)).^2)';
+    gaussianKernel = gaussianTemp / sum(gaussianTemp);
     
-    trialFinal = struct;
-    win = 10*(scale_window/group);
-    normstd = scale_window/group;
-    alpha = (win-1)/(2*normstd);
-    temp1 = -(win-1)/2 : (win-1)/2;
-    gausstemp = exp((-1/2) * (alpha * temp1/((win-1)/2)).^2)';
-    gaussian_window = gausstemp/sum(gausstemp);
-    for i = 1:size(trialProcessed,2)
-        for j = 1:size(trialProcessed,1)
-            hold_rates = zeros(size(trialProcessed(j,i).spikes,1), size(trialProcessed(j,i).spikes,2));
-            for k = 1:size(trialProcessed(j,i).spikes,1)
-                hold_rates(k,:) = conv(trialProcessed(j,i).spikes(k,:), gaussian_window, 'same')/(group/1000);
+    for col = 1:size(binnedTrials,2)
+        for row = 1:size(binnedTrials,1)
+            [numNeurons, numBins] = size(binnedTrials(row,col).spikes);
+            smoothedRates = zeros(numNeurons, numBins);
+            for neuronIdx = 1:numNeurons
+                smoothedRates(neuronIdx,:) = conv(binnedTrials(row,col).spikes(neuronIdx,:), gaussianKernel, 'same') / (binSize/1000);
             end
-            trialFinal(j,i).rates = hold_rates;
+            trialsWithRates(row,col).rates = smoothedRates;
         end
     end
 end
 
-function [outLabels] = getKNNs(WTest, WTrain, dimLDA, nearFactor)
-    % Perform k-nearest neighbors classification on projected data.
-    % Inputs:
-    %   WTest    - dimLDA x 1 vector from the test trial after projection
-    %   WTrain   - dimLDA x N matrix from the training data after projection
-    %   dimLDA   - number of LDA dimensions used
-    %   nearFactor - parameter for kNN (not used in current implementation)
-    %
-    % Output:
-    %   outLabels - predicted direction label (mode of nearest neighbors)
+function predictedLabel = getKNNs(testProjection, trainingProjection, ldaDimension, neighborhoodFactor)
+% GETKNNs Determines the reaching direction using a k-Nearest Neighbors approach.
+%   This function computes the Euclidean distances between the test projection
+%   and training projection data, then uses the kNN algorithm to assign a label.
+%
+%   Inputs:
+%       testProjection     - Projection of test data (after PCA-LDA).
+%       trainingProjection - Projection of training data (after PCA-LDA).
+%       ldaDimension       - Number of LDA dimensions used.
+%       neighborhoodFactor - Factor to adjust the number of nearest neighbors.
+%
+%   Output:
+%       predictedLabel     - Predicted reaching direction label.
+
+    trainingMatrix = trainingProjection';
+    testingMatrix = testProjection;
+    trainingSquared = sum(trainingMatrix .* trainingMatrix, 2);
+    testingSquared = sum(testingMatrix .* testingMatrix, 1);
     
-    trainMat = WTrain';
-    testMat = WTest;
-    trainSq = sum(trainMat .* trainMat, 2);
-    testSq = sum(testMat .* testMat, 1);
-    % Compute squared Euclidean distances (each row corresponds to a test point)
-    allDists = trainSq(:, ones(1, length(testMat))) + testSq(ones(1, length(trainMat)), :) - 2 * trainMat * testMat;
-    allDists = allDists';
+    % Compute the squared Euclidean distance between each test and training point.
+    distanceMatrix = trainingSquared(:, ones(1, length(testingMatrix))) + ...
+                     testingSquared(ones(1, length(trainingMatrix)), :) - ...
+                     2 * trainingMatrix * testingMatrix;
+    distanceMatrix = distanceMatrix';
     
-    % Sort distances and select k nearest neighbors
-    k = 25;
-    [~, sorted] = sort(allDists, 2);
-    nearest = sorted(:, 1:k);
+    % Determine the k nearest neighbors.
+    k = 25;  % Fixed number of neighbors.
+    [~, sortedIndices] = sort(distanceMatrix, 2);
+    nearestNeighbors = sortedIndices(:, 1:k);
     
-    % Generate direction labels for training data (assumes equal number per direction)
-    noTrain = size(WTrain, 2) / 8;
-    dirLabels = [ones(1, noTrain), 2*ones(1, noTrain), 3*ones(1, noTrain), 4*ones(1, noTrain), ...
-                 5*ones(1, noTrain), 6*ones(1, noTrain), 7*ones(1, noTrain), 8*ones(1, noTrain)]';
-    nearestLabs = reshape(dirLabels(nearest), [], k);
-    outLabels = mode(mode(nearestLabs, 2));
+    % Map training trials to their corresponding direction labels.
+    numTrialsPerDirection = size(trainingProjection, 2) / 8;
+    directionLabels = [ones(1, numTrialsPerDirection), 2*ones(1, numTrialsPerDirection), ...
+                       3*ones(1, numTrialsPerDirection), 4*ones(1, numTrialsPerDirection), ...
+                       5*ones(1, numTrialsPerDirection), 6*ones(1, numTrialsPerDirection), ...
+                       7*ones(1, numTrialsPerDirection), 8*ones(1, numTrialsPerDirection)]';
+    nearestLabels = reshape(directionLabels(nearestNeighbors), [], k);
+    predictedLabel = mode(mode(nearestLabels, 2));
 end
+
+

@@ -18,7 +18,7 @@ addpath(teamName);
 trainingData = trial(ix(1:80),:);
 % testData = trial(ix(51:end),:);
 % testData = trial(ix(99:end),:);
-testData = trial(99,:);
+testData = trial(51,:);
 
 fprintf('Testing the continuous position estimator...')
 
@@ -71,8 +71,9 @@ end
 
 legend('Decoded Position', 'Actual Position')
 
-RMSE = sqrt(meanSqError/n_predictions) 
+RMSE = sqrt(meanSqError/n_predictions) ;
 
 rmpath(genpath(teamName))
+assignin('base', 'handPos', decodedHandPos);
 
 end

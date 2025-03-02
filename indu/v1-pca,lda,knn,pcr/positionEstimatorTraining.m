@@ -71,26 +71,31 @@ function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAn
         angle_idx_e = (angle_labels_e == unique_angles(i));
         
         X = d_reduced(angle_idx, :); % Use centered data
-
-        % size(Y_data)
         
         % Extract the corresponding hand positions
         Y_selected = Y_data(angle_idx_e, :); % This has shape (num_trials × 2)
 
-        % Compute the means for X and Y hand positions
-        mean_X_a = mean(Y_selected(1:2:end, :), 'all'); % Mean of all X positions
-        mean_Y_a = mean(Y_selected(2:2:end, :), 'all') ; % Mean of all Y positions
-        
+        assignin('base', 'y_angle', Y_selected);
         % Separate into X and Y coordinates
         Y_x = Y_selected(1:2:end, :); % Take the first column → X coordinates
         Y_y = Y_selected(2:2:end, :); % Take the second column → Y coordinates
+
+        Y_x = mean(Y_selected(1:2:end, :), 2);  % Collapse across time
+        Y_y = mean(Y_selected(2:2:end, :), 2);
         
-        Y_x = Y_x - mean_X_a;
-        Y_y = Y_y - mean_Y_a;
+        assignin('base', 'y_x', Y_x);
+        % Compute the means for X and Y hand positions
+        mean_X_a = mean(Y_x, 'all'); % Mean of all X positions
+        mean_Y_a = mean(Y_y, 'all') ; % Mean of all Y positions
+        
+        assignin('base', 'y_x_mean', mean_X_a);
+
+        % Y_x = Y_x - mean_X_a;
+        % Y_y = Y_y - mean_Y_a;
 
         % Ensure column vectors for correct matrix multiplication
-        % Y_x = Y_x(:);
-        % Y_y = Y_y(:);
+        Y_x = Y_x(:);
+        Y_y = Y_y(:);
         
         % Debugging: Print sizes (optional)
         % size(X)
@@ -98,72 +103,17 @@ function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAn
         % size(Y_y)
 
         % Solve for beta_x and beta_y using normal equation (No Bias Term)
-        beta_x_all{i} = (X' * X) \ (X' * Y_x);
-        beta_y_all{i} = (X' * X) \ (X' * Y_y);
+        % beta_x_all{i} = (X' * X) \ (X' * Y_x);
+        % beta_y_all{i} = (X' * X) \ (X' * Y_y);
+        size(X)
+        size(Y_x)
+        beta_x_all{i} = X \ Y_x;  % Using \ to perform the least squares fit (50 x 1 coefficients)
+        beta_y_all{i} = X \ Y_y; 
         mean_x{i} = mean_X_a;
         mean_y{i} = mean_Y_a;
     end
 end
 
-
-%%
-% function [B_combined] = regression(Y_data, d_reduced, num_angles, num_trials)
-%     % Y_data: Position data, size (2 * num_samples, T_max)
-%     % d_reduced: PCA-reduced data, size (num_trials, num_pcs)
-% 
-%     % Extract x and y position data
-%     x_data = Y_data(1:2:end, :);  % Extract x-coordinates (odd rows)
-%     y_data = Y_data(2:2:end, :);  % Extract y-coordinates (even rows)
-% 
-%     model_params.regression = struct;
-% 
-%     num_trials_per_angle = num_trials;  % Number of trials for each angle
-% 
-%     for i = 1:num_angles
-%         % Extract the PCA components for the current angle
-%         % Each angle corresponds to num_trials_per_angle rows in d_reduced
-%         start_idx = (i-1) * num_trials_per_angle + 1;
-%         end_idx = i * num_trials_per_angle;
-% 
-%         W_dir = d_reduced(start_idx:end_idx, :)';  % Transpose for consistency (num_pcs x num_trials_per_angle)
-%         size(W_dir)
-%         % Get position data for the current time point (all time points)
-%         x4pcr = x_data(:);  % x-position data (all time points)
-%         y4pcr = y_data(:);  % y-position data (all time points)
-% 
-%         % Center the position data (optional, if needed)
-%         mean_x = mean(x4pcr);
-%         mean_y = mean(y4pcr);
-% 
-%         % Define Gaussian filter parameters
-%         filterWindow = 15;      % Window length (number of samples)
-%         sigma = 100;            % Standard deviation for Gaussian
-%         x_axis = -floor(filterWindow/2):floor(filterWindow/2);
-%         gaussKernel = exp(-x_axis.^2/(2*sigma^2));
-%         gaussKernel = gaussKernel / sum(gaussKernel);  % Normalize
-% 
-%         % Apply Gaussian filter to smooth the position data
-%         x4pcr = conv(x4pcr - mean_x, gaussKernel, 'same');
-%         y4pcr = conv(y4pcr - mean_y, gaussKernel, 'same');
-% 
-%         size(x4pcr)
-%         % Train linear regression models using least squares
-%         beta_x = W_dir \ x4pcr;  % Solve for beta (weights) for x position
-%         beta_y = W_dir \ y4pcr;  % Solve for beta (weights) for y position
-% 
-%         % Store regression parameters for the current direction (angle)
-%         model_params.regression(i).beta_x = beta_x;
-%         model_params.regression(i).beta_y = beta_y;
-%         model_params.regression(i).mean_x = mean_x;
-%         model_params.regression(i).mean_y = mean_y;
-%     end
-% 
-%     % Combine beta_x and beta_y into one matrix (as requested)
-%     B_combined = struct;
-%     B_combined.beta_x = beta_x;
-%     B_combined.beta_y = beta_y;
-% end
-% 
 
 
 %% Preprocess Data - padding for handpos and spikes
@@ -342,6 +292,7 @@ end
 % grid on;
 
 end
+
 %%
 function[cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(X_lda,predicted_labels,angle_labels)
 %Perform K-means clustering manually (without using kmeans function or pdist2)
@@ -460,15 +411,5 @@ for i = 1:length(angle_labels)
     end
 end
 end
-
-
-
-%%
-
-% % Step 1: Standardize the data (zero mean, unit variance)
-% Y_mean = mean(Y_data, 1);  
-% Y_std = std(Y_data, 0, 1);
-% Y_data_scaled = (Y_data - Y_mean) ./ Y_std;
-
 
  end
