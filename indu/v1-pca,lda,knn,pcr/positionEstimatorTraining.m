@@ -13,9 +13,10 @@ num_trials = size(training_data,1);
 num_angles = size(training_data,2);
 
 bin_size = 20;
-[X_data,Y_data] = preprocessing(training_data,num_trials,num_angles,bin_size);
+[X_data,Y_data,num_bins] = preprocessing(training_data,num_trials,num_angles,bin_size);
 model_params.firing_data = X_data;
 model_params.bin_size = bin_size;
+model_params.num_bins = num_bins;
 
 num_PC=50;
 % [d_reduced,coeff_hand,num_PC,V_hand] = applyPCA(X_data);
@@ -35,10 +36,9 @@ model_params.centroids = cluster_centroids;
 model_params.cluster_angle_mapping = cluster_angle_mapping;
 model_params.reach_angles = reach_angles;
 
-[beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels,num_trials);
+[beta_x_all, beta_y_all, unique_angles,mean_x,mean_y] = trainAngleWiseRegressionXY(X_data, Y_data, angle_labels,num_trials,num_bins,num_PC);
 model_params.b_x = beta_x_all;
 model_params.b_y = beta_y_all;
-model_params.meanX = mean_X;
 model_params.unique_angles = unique_angles;
 model_params.meanx_pos = mean_x;
 model_params.meany_pos = mean_y;
@@ -46,78 +46,59 @@ model_params.meany_pos = mean_y;
 model_params.iterations = 0;
 model_params.trial_id = 0;
 %%
-function [beta_x_all, beta_y_all, unique_angles, mean_X,mean_x,mean_y] = trainAngleWiseRegressionXY(d_reduced, Y_data, angle_labels,num_trials)
+function [beta_x_all, beta_y_all, unique_angles, mean_x, mean_y] = trainAngleWiseRegressionXY(X_data, Y_data, angle_labels, num_trials, num_bins, num_PC)
     unique_angles = unique(angle_labels); % Find all unique angles
     num_angles = length(unique_angles);
     
-    beta_x_all = cell(num_angles, 1); % Store regression models for X
-    beta_y_all = cell(num_angles, 1); % Store regression models for Y
+    beta_x_all = cell(num_angles, num_bins); % Store regression models for X
+    beta_y_all = cell(num_angles, num_bins); % Store regression models for Y
     
-    % Compute the mean of PCA-transformed data
-    mean_X = mean(d_reduced, 1); % Compute mean across trials (row-wise)
+    mean_x = cell(num_angles, num_bins);
+    mean_y = cell(num_angles, num_bins);
     
-    % Center the data (subtract mean)
-    % d_reduced_centered = d_reduced - mean_X;
-
-    mean_x = cell(num_angles, 1);
-    mean_y = cell(num_angles, 1);
-
     angles = 1:8;  % The unique angle labels
-    angle_labels_e = repelem(angles,num_trials*2); % Repeat each number 4 times
-    
+    angle_labels_e = repelem(angles, num_trials * 2); % Repeat each number 4 times
+
     for i = 1:num_angles
         % Extract trials corresponding to this angle
         angle_idx = (angle_labels == unique_angles(i));
         angle_idx_e = (angle_labels_e == unique_angles(i));
         
-        X = d_reduced(angle_idx, :); % Use centered data
-        
+        X_selected = X_data(angle_idx, :);
+        [s_pca, coeff_hand] = covPCA(X_selected, num_PC); % Compute PCA for this angle
+        assignin('base', 's_pca', s_pca);
+
         % Extract the corresponding hand positions
-        Y_selected = Y_data(angle_idx_e, :); % This has shape (num_trials × 2)
+        Y_selected = Y_data(angle_idx_e, :); % Shape (num_trials × 2*num_bins)
 
-        assignin('base', 'y_angle', Y_selected);
-        % Separate into X and Y coordinates
-        Y_x = Y_selected(1:2:end, :); % Take the first column → X coordinates
-        Y_y = Y_selected(2:2:end, :); % Take the second column → Y coordinates
+        for j = 1:num_bins
+            % Extract the j-th bin across trials
+            Y_x = Y_selected(1:2:end, j)-mean(Y_selected(1:2:end, j)); % X coordinates for the j-th bin
+            Y_y = Y_selected(2:2:end, j)-mean( Y_selected(2:2:end, j)); % Y coordinates for the j-th bin
 
-        Y_x = mean(Y_selected(1:2:end, :), 2);  % Collapse across time
-        Y_y = mean(Y_selected(2:2:end, :), 2);
-        
-        assignin('base', 'y_x', Y_x);
-        % Compute the means for X and Y hand positions
-        mean_X_a = mean(Y_x, 'all'); % Mean of all X positions
-        mean_Y_a = mean(Y_y, 'all') ; % Mean of all Y positions
-        
-        assignin('base', 'y_x_mean', mean_X_a);
-
-        % Y_x = Y_x - mean_X_a;
-        % Y_y = Y_y - mean_Y_a;
-
-        % Ensure column vectors for correct matrix multiplication
-        Y_x = Y_x(:);
-        Y_y = Y_y(:);
-        
-        % Debugging: Print sizes (optional)
-        % size(X)
-        % size(Y_x)
-        % size(Y_y)
-
-        % Solve for beta_x and beta_y using normal equation (No Bias Term)
-        % beta_x_all{i} = (X' * X) \ (X' * Y_x);
-        % beta_y_all{i} = (X' * X) \ (X' * Y_y);
-        size(X)
-        size(Y_x)
-        beta_x_all{i} = X \ Y_x;  % Using \ to perform the least squares fit (50 x 1 coefficients)
-        beta_y_all{i} = X \ Y_y; 
-        mean_x{i} = mean_X_a;
-        mean_y{i} = mean_Y_a;
+            mean_X_a = mean(Y_selected(1:2:end, j)); % Mean across trials
+            mean_Y_a = mean(Y_selected(2:2:end, j));
+            
+            % Ensure column vectors for correct matrix multiplication
+            Y_x = Y_x(:);
+            Y_y = Y_y(:);
+            
+            assignin('base', 'y_selected', Y_x);
+            % Compute regression coefficients for this bin
+            % Compute PCR regression coefficients for this bin
+            % Compute PCR regression coefficients using pseudoinverse
+            beta_x_all{i, j} = pinv(s_pca) * Y_x;  
+            beta_y_all{i, j} = pinv(s_pca) * Y_y;  
+            % beta_x_all{i, j} = s_pca \ Y_x;  
+            % beta_y_all{i, j} = s_pca \ Y_y;  
+            mean_x{i, j} = mean_X_a;
+            mean_y{i, j} = mean_Y_a;
+        end
     end
 end
+%%
 
-
-
-%% Preprocess Data - padding for handpos and spikes
-    function [X_data,Y_data] = preprocessing(t_data,num_trials,num_angles,bin_size)
+function [X_data, Y_data, num_bins] = preprocessing(t_data, num_trials, num_angles, bin_size)
 start = 301;
 end_remove = 100;
 
@@ -125,18 +106,21 @@ end_remove = 100;
 T_max = -inf; % Initialize with a small value
 for angle = 1:num_angles
     for t = 1:num_trials
-        T_max= max(T_max, size(t_data(t, angle).spikes, 2));
+        T_max = max(T_max, size(t_data(t, angle).spikes, 2));
     end
 end
 
-T_max = T_max - end_remove;
+T_max = T_max - end_remove - start;
+T_max = ceil(T_max / 20) * 20;
+% Downsample to 20ms bins
+num_bins = floor(T_max / bin_size)
 
 % Define parameters
 sigma = 20; % Standard deviation of Gaussian window (in ms)
 window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
 
 X_data = []; % Initialize feature matrix
-Y_data = []; % Initialize labels (hand positions)
+Y_data = []; % Initialize combined Y matrix
 
 for angle = 1:num_angles
     for t = 1:num_trials
@@ -165,14 +149,24 @@ for angle = 1:num_angles
         % Convolve each neuron's spike train with Gaussian kernel
         smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
 
-        % Downsample to 20ms bins
-        num_bins = floor(T_max /bin_size);
-        firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+
+        firing_rates = zeros(size(spikes, 1), num_bins); % 98 x num_bins
 
         for bin = 1:num_bins
             idx_start = (bin - 1) * bin_size + 1;
-            idx_end = bin * bin_size;
+            idx_end = min(bin * bin_size, T_max);
             firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
+        end
+
+        % Downsample X and Y hand positions separately
+        Y_x_binned = zeros(1, num_bins); % 1 x num_bins (for X)
+        Y_y_binned = zeros(1, num_bins); % 1 x num_bins (for Y)
+        
+        for bin = 1:num_bins
+            idx_start = (bin - 1) * bin_size + 1;
+            idx_end = min(bin * bin_size, T_max);
+            Y_x_binned(:, bin) = mean(handPos(1, idx_start:idx_end), 2); % X coordinate
+            Y_y_binned(:, bin) = mean(handPos(2, idx_start:idx_end), 2); % Y coordinate
         end
 
         % Flatten firing rate matrix into a feature vector
@@ -180,7 +174,9 @@ for angle = 1:num_angles
 
         % Store the data
         X_data = [X_data; feature_vector]; % Feature matrix
-        Y_data = [Y_data; handPos]; % Flatten trajectory
+
+        % Arrange X and Y alternately in Y_data
+        Y_data = [Y_data; Y_x_binned; Y_y_binned]; 
     end
 end
 X_data = X_data * 1000; % Scale firing rates

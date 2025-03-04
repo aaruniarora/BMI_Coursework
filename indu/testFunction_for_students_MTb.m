@@ -15,10 +15,10 @@ ix = randperm(length(trial));
 addpath(teamName);
 
 % Select training and testing data (you can choose to split your data in a different way if you wish)
-trainingData = trial(ix(1:80),:);
-% testData = trial(ix(51:end),:);
+trainingData = trial(ix(1:50),:);
+testData = trial(ix(51:end),:);
 % testData = trial(ix(99:end),:);
-testData = trial(51,:);
+% testData = trial(51,:);
 
 fprintf('Testing the continuous position estimator...')
 
@@ -65,6 +65,7 @@ for tr=1:size(testData,1)
         n_predictions = n_predictions+length(times);
         hold on
         plot(decodedHandPos(1,:),decodedHandPos(2,:), 'r');
+        % disp(decodedHandPos)
         plot(testData(tr,direc).handPos(1,times),testData(tr,direc).handPos(2,times),'b')
     end
 end

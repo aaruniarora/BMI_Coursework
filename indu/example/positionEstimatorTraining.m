@@ -48,7 +48,7 @@ end
 lowFiringNeurons = [];
 for neuronIdx = 1:numNeurons
     avgFiringRate = mean(mean(aggregatedFiringRates(neuronIdx:numNeurons:end, :)));
-    if avgFiringRate < 0.5
+    if avgFiringRate < 0.1
         lowFiringNeurons = [lowFiringNeurons, neuronIdx];
     end
 end
@@ -99,8 +99,8 @@ for currentTimeBinLimit = timeBinLimits
     withinClassScatter = totalScatter - betweenClassScatter;
     
     % Set reduction dimensions (arbitrary values for now)
-    numPCADimensions = 30;
-    numLDADimensions = 6;
+    numPCADimensions = 35;
+    numLDADimensions = 4;
     
     % ----------------- Linear Discriminant Analysis (LDA) -----------------
     ldaMatrix = (principalComponents(:,1:numPCADimensions)' * withinClassScatter * principalComponents(:,1:numPCADimensions)) \ ...
@@ -129,36 +129,44 @@ timeBinsForFiring = repelem(timeBin:timeBin:endBin, numNeurons);
 testingTimeBins = startBin:timeBin:endBin;
 
 % Compute PCR regression coefficients for each direction and time window.
+% Compute PCR regression coefficients using Polynomial Regression for each direction and time window.
+polyDegree = 1;  % Degree of polynomial regression
+modelParameters.polyd = polyDegree;
+
 for directionIdx = 1:numDirections
     posXDirection = squeeze(xTestIntervals(:,:,directionIdx));
     posYDirection = squeeze(yTestIntervals(:,:,directionIdx));
-    
+
     numTimeWindows = ((endBin - startBin) / timeBin) + 1;
     for timeWindowIdx = 1:numTimeWindows
         % Demean the position data at the current time window.
         demeanedX = posXDirection(:, timeWindowIdx) - mean(posXDirection(:, timeWindowIdx));
         demeanedY = posYDirection(:, timeWindowIdx) - mean(posYDirection(:, timeWindowIdx));
-        
+
         % Extract firing rates corresponding to the current time window and direction.
         windowedFiringRates = aggregatedFiringRates(timeBinsForFiring <= testingTimeBins(timeWindowIdx), directionLabels == directionIdx);
         [pcaEigenVectors, ~] = performPCA(windowedFiringRates);
-        
+
         % Project the windowed firing data onto principal components.
         Z = pcaEigenVectors(:, 1:numPCADimensions)' * (windowedFiringRates - mean(windowedFiringRates, 1));
-        
-        % Compute regression coefficients for the X and Y positions.
-        Bx = (pcaEigenVectors(:,1:numPCADimensions) * inv(Z*Z') * Z) * demeanedX;
-        By = (pcaEigenVectors(:,1:numPCADimensions) * inv(Z*Z') * Z) * demeanedY;
-        
-        % Store PCR regression coefficients and mean firing rates.
+
+        % Expand Z with polynomial features
+        Z_poly = [];
+        for p = 1:polyDegree
+            Z_poly = [Z_poly; Z.^p];
+        end
+
+        % Compute regression coefficients for the X and Y positions using polynomial features
+        Bx = (Z_poly * Z_poly') \ (Z_poly * demeanedX);
+        By = (Z_poly * Z_poly') \ (Z_poly * demeanedY);
+
+        % Store PCR regression coefficients and mean firing rates
         modelParameters.pcr(directionIdx, timeWindowIdx).bx = Bx;
         modelParameters.pcr(directionIdx, timeWindowIdx).by = By;
         modelParameters.pcr(directionIdx, timeWindowIdx).fMean = mean(windowedFiringRates, 1);
         modelParameters.averages(timeWindowIdx).avX = squeeze(mean(meanPosX, 1));
         modelParameters.averages(timeWindowIdx).avY = squeeze(mean(meanPosY, 1));
     end
-end
-
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -266,4 +274,5 @@ function [meanPosX, meanPosY, resampledPosX, resampledPosY] = getPaddedAndResamp
             resampledPosY(trialIdx,:,directionIdx) = tempPosY(1:binInterval:end);
         end
     end
+end
 end

@@ -19,6 +19,7 @@ else
 end
 modelParameters.iterations = modelParameters.iterations + 1;
 bin_size = modelParameters.bin_size;
+num_bins = modelParameters.num_bins;
 [X_new_processed] = preprocessing(testData,bin_size);
 
 % 2. Apply PCA on the new data using the stored PCA coefficients
@@ -78,13 +79,11 @@ unique_angles = modelParameters.unique_angles;
 mean_X_pos= modelParameters.meanx_pos;
 mean_Y_pos = modelParameters.meany_pos;
 
-if modelParameters.iterations == 1
-    x = testData.startHandPos(1);
-    y = testData.startHandPos(2);
-elseif modelParameters.iterations > 1
-[x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_reach_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
-elseif modelParameters.iterations > 50
-[x,y] = predictHandPositionByAngleXY(d_reduced_new,modelParameters.prev_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos);
+
+if modelParameters.iterations > 50
+[x,y] = predictHandPositionByAngleXY(d_reduced_new,modelParameters.prev_angle, beta_x_all, beta_y_all, cluster_angle_mapping,mean_X_pos, mean_Y_pos,num_bins);
+else
+[x, y] = predictHandPositionByAngleXY(d_reduced_new, predicted_reach_angle, beta_x_all, beta_y_all, cluster_angle_mapping, mean_X_pos, mean_Y_pos, num_bins);
 end
 %% Preprocess Data - padding for handpos and spikes
 function [X_data] = preprocessing(t_data,bin_size)
@@ -107,10 +106,10 @@ len = length(spikes);
 smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
 
 % Downsample to 20ms bins
-num_bins = floor(len/ bin_size);
-firing_rates = zeros(size(spikes,1), num_bins); % 98 x num_bins
+num_b = floor(len/ bin_size);
+firing_rates = zeros(size(spikes,1), num_b); % 98 x num_bins
 
-for bin = 1:num_bins
+for bin = 1:num_b
     idx_start = (bin - 1) * bin_size + 1;
     idx_end = bin * bin_size;
     firing_rates(:, bin) = mean(smoothed_spikes(:, idx_start:idx_end), 2);
@@ -150,7 +149,30 @@ function predicted_direction = predict_direction(lda_component_test, cluster_cen
     % predicted_direction_deg = rad2deg(predicted_direction);  % Convert to degrees if needed
 end
 %%
-    function [x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, beta_x_all, beta_y_all,cluster_angle_mapping,mean_X_pos, mean_Y_pos)
+%     function [x,y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, beta_x_all, beta_y_all,cluster_angle_mapping,mean_X_pos, mean_Y_pos)
+%     % Find which model to use based on the predicted angle
+%     angle_idx = find(cluster_angle_mapping == predicted_angle, 1);
+% 
+%     if isempty(angle_idx)
+%         error('Predicted angle not found in trained models.');
+%     end
+% 
+%     % Select the appropriate regression models for X and Y
+%     beta_x = beta_x_all{angle_idx};
+%     beta_y = beta_y_all{angle_idx};
+% 
+%     % Center the new data by subtracting the training mean
+%     % X_new = d_reduced_new - mean_X(:,1:length(d_reduced_new));
+%     X_new = d_reduced_new;
+% 
+%     size(X_new)
+% 
+%     % Predict X and Y positions separately (No Bias Term)
+%     x = (X_new * beta_x);% + mean_X_pos{angle_idx};
+%     y = (X_new * beta_y);% + mean_Y_pos{angle_idx};
+% end
+
+function [x, y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, beta_x_all, beta_y_all, cluster_angle_mapping, mean_X_pos, mean_Y_pos, num_bins)
     % Find which model to use based on the predicted angle
     angle_idx = find(cluster_angle_mapping == predicted_angle, 1);
     
@@ -158,19 +180,32 @@ end
         error('Predicted angle not found in trained models.');
     end
     
-    % Select the appropriate regression models for X and Y
-    beta_x = beta_x_all{angle_idx};
-    beta_y = beta_y_all{angle_idx};
+    % Initialize predicted hand positions
+    predicted_X = zeros(1, num_bins);
+    predicted_Y = zeros(1, num_bins);
 
-    % Center the new data by subtracting the training mean
-    % X_new = d_reduced_new - mean_X(:,1:length(d_reduced_new));
-    X_new = d_reduced_new;
+    % Iterate over time bins
+    for bin = 1:num_bins
+        % Select the appropriate regression model for this time bin
+        beta_x = beta_x_all{angle_idx, bin};
+        beta_y = beta_y_all{angle_idx, bin};
 
-    size(X_new)
-    
-    % Predict X and Y positions separately (No Bias Term)
-    x = (X_new * beta_x);% + mean_X_pos{angle_idx};
-    y = (X_new * beta_y);% + mean_Y_pos{angle_idx};
+        % Predict X and Y positions separately (No Bias Term)
+        predicted_X(bin) = d_reduced_new* beta_x+mean_X_pos{angle_idx,bin}; % Predicted X at this bin
+        predicted_Y(bin) = d_reduced_new* beta_y+mean_Y_pos{angle_idx,bin}; % Predicted Y at this bin
+    end
+    % Output the last value in the predicted hand positions
+    try
+    idx = floor(trialDuration / bin_size);
+    x = predicted_X(idx);
+    y = predicted_Y(idx);
+    catch
+    % If an error occurs, use the last value as a fallback
+    x = predicted_X(end);
+    y = predicted_Y(end);
+    warning('Index out of bounds. Using the last predicted value.');
+    end
+end
 end
 
-end
+

@@ -46,7 +46,7 @@ if trialDuration <= 560
     
     % --- Confidence-Based Classification ---
     % Call a modified kNN that returns both a predicted label and a confidence measure.
-    [predictedLabel, confidence] = getKNNs_confidence(testProjection, trainingProjWeights, ldaDimension, 8);
+    [predictedLabel, confidence] = getKNNs_confidence(testProjection, trainingProjWeights, ldaDimension, 20);
     threshold = 0.5;  % Example confidence threshold.
     if confidence < threshold
         % If confidence is low, retain the previously determined direction.
@@ -64,9 +64,10 @@ else
 end
 
 % ---------------- PCR: Predicting Hand Position ----------------
+polyDegree = updatedModelParameters.polyd;
 if trialDuration <= 560
     numNeurons = size(smoothedTrial(1,1).rates, 1) - length(removedNeuronIndices);
-    timeWindowIndex = (trialDuration/binSize) - (320/binSize) + 1;
+    timeWindowIndex = (trialDuration / binSize) - (320 / binSize) + 1;
     
     averagePosX = updatedModelParameters.averages(timeWindowIndex).avX(:, predictedLabel);
     averagePosY = updatedModelParameters.averages(timeWindowIndex).avY(:, predictedLabel);
@@ -74,8 +75,18 @@ if trialDuration <= 560
     regressionCoeffX = updatedModelParameters.pcr(predictedLabel, timeWindowIndex).bx;
     regressionCoeffY = updatedModelParameters.pcr(predictedLabel, timeWindowIndex).by;
     
-    predictedX = (processedFiringVector - mean(meanFiringPCR))' * regressionCoeffX + averagePosX;
-    predictedY = (processedFiringVector - mean(meanFiringPCR))' * regressionCoeffY + averagePosY;
+    % Ensure firing vector has exactly 70 elements (same as regressionCoeffX)
+    firingVector = processedFiringVector(1:length(regressionCoeffX));  
+    
+    % Expand features with polynomial terms but maintain 70 features
+    polyFiringVector = zeros(size(firingVector)); % Initialize same size as firingVector
+    for d = 1:polyDegree
+        polyFiringVector = polyFiringVector + (firingVector - mean(meanFiringPCR)).^d;
+    end
+    
+    % Predict position using polynomial regression
+    predictedX = polyFiringVector' * regressionCoeffX + averagePosX;
+    predictedY = polyFiringVector' * regressionCoeffY + averagePosY;
     
     try
         predictedX = predictedX(trialDuration, 1);
@@ -85,6 +96,7 @@ if trialDuration <= 560
         predictedY = predictedY(end, 1);
     end
 else
+
     numNeurons = size(smoothedTrial(1,1).rates, 1) - length(removedNeuronIndices);
     averagePosX = updatedModelParameters.averages(13).avX(:, predictedLabel);
     averagePosY = updatedModelParameters.averages(13).avY(:, predictedLabel);
@@ -92,8 +104,18 @@ else
     regressionCoeffX = updatedModelParameters.pcr(predictedLabel, 13).bx;
     regressionCoeffY = updatedModelParameters.pcr(predictedLabel, 13).by;
     
-    predictedX = (processedFiringVector(1:length(regressionCoeffX)) - mean(processedFiringVector(1:length(regressionCoeffX))))' * regressionCoeffX + averagePosX;
-    predictedY = (processedFiringVector(1:length(regressionCoeffY)) - mean(processedFiringVector(1:length(regressionCoeffY))))' * regressionCoeffY + averagePosY;
+    % Ensure firing vector has exactly 70 elements (same as regressionCoeffX)
+    firingVector = processedFiringVector(1:length(regressionCoeffX));  
+
+  % Expand features with polynomial terms but maintain 70 features
+    polyFiringVector = zeros(size(firingVector)); % Initialize same size as firingVector
+    for d = 1:polyDegree
+        polyFiringVector = polyFiringVector + (firingVector - mean(meanFiringPCR)).^d;
+    end
+    
+    % Predict position using polynomial regression
+    predictedX = polyFiringVector' * regressionCoeffX + averagePosX;
+    predictedY = polyFiringVector' * regressionCoeffY + averagePosY;
     
     try
         predictedX = predictedX(trialDuration, 1);
@@ -104,7 +126,6 @@ else
     end
 end
 
-end
 
 % --- Modified kNN function returning confidence ---
 function [predictedLabel, confidence] = getKNNs_confidence(testProjection, trainingProjection, ldaDimension, neighborhoodFactor)
@@ -246,6 +267,7 @@ function predictedLabel = getKNNs(testProjection, trainingProjection, ldaDimensi
                        7*ones(1, numTrialsPerDirection), 8*ones(1, numTrialsPerDirection)]';
     nearestLabels = reshape(directionLabels(nearestNeighbors), [], k);
     predictedLabel = mode(mode(nearestLabels, 2));
+end
 end
 
 
