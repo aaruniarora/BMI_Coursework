@@ -10,6 +10,10 @@ function [modelParameters, aggregatedFiringRates] = positionEstimatorTraining(tr
 %   modelParameters      - structure with classifier and regression parameters
 %   aggregatedFiringRates - aggregated firing rates used in model training
 
+% clc;close all;clear;
+% load('monkeydata_training.mat')
+% trainingData = trial;
+
 % ------------------------- Initialization -------------------------
 numDirections = 8;                    % number of movement directions
 timeBin = 20;                         % binning interval (in ms)
@@ -18,6 +22,8 @@ numTrainingTrials = length(trainingData); % total number of training trials
 
 % Preprocess spike data: binning and square-root transformation
 binnedTrials = binAndSqrtSpikes(trainingData, timeBin, true);
+% figure; plot(binnedTrials(1,1).spikes); title('binnedTrials');
+
 % Smooth binned data with a Gaussian kernel to obtain firing rates
 smoothedTrials = computeFiringRates(binnedTrials, timeBin, gaussianScale);
 targetAnglesDeg = [30 70 110 150 190 230 310 350];  % target directions (degrees)
@@ -52,6 +58,7 @@ for neuronIdx = 1:numNeurons
         lowFiringNeurons = [lowFiringNeurons, neuronIdx];
     end
 end
+% figure; plot(aggregatedFiringRates); title('aggregatedFiringRates');
 clear aggregatedFiringRates
 removedNeurons{end+1} = lowFiringNeurons;
 modelParameters.lowFirers = removedNeurons;
@@ -87,6 +94,7 @@ for currentTimeBinLimit = timeBinLimits
     
     % --------------------- Principal Component Analysis ---------------------
     [principalComponents, eigenValues] = performPCA(aggregatedFiringRates);
+    % figure; plot(principalComponents); title('principalComponents');
     
     % Compute class means for each direction.
     classMeanMatrix = zeros(size(aggregatedFiringRates,1), numDirections);
@@ -100,7 +108,7 @@ for currentTimeBinLimit = timeBinLimits
     
     % Set reduction dimensions (arbitrary values for now)
     numPCADimensions = 35;
-    numLDADimensions = 4;
+    numLDADimensions = 6;
     
     % ----------------- Linear Discriminant Analysis (LDA) -----------------
     ldaMatrix = (principalComponents(:,1:numPCADimensions)' * withinClassScatter * principalComponents(:,1:numPCADimensions)) \ ...
@@ -109,6 +117,7 @@ for currentTimeBinLimit = timeBinLimits
     [~, ldaSortIndices] = sort(diag(ldaEigenValues), 'descend');
     optimalProjection = principalComponents(:,1:numPCADimensions) * ldaEigenVectors(:, ldaSortIndices(1:numLDADimensions));
     projectedDataWeights = optimalProjection' * (aggregatedFiringRates - overallMean);
+    % figure; plot(projectedDataWeights); title('projectedDataWeights');
     
     % Store classifier parameters for this time window.
     modelParameters.classify(modelIndex).wLDA_kNN = projectedDataWeights;
@@ -129,44 +138,36 @@ timeBinsForFiring = repelem(timeBin:timeBin:endBin, numNeurons);
 testingTimeBins = startBin:timeBin:endBin;
 
 % Compute PCR regression coefficients for each direction and time window.
-% Compute PCR regression coefficients using Polynomial Regression for each direction and time window.
-polyDegree = 1;  % Degree of polynomial regression
-modelParameters.polyd = polyDegree;
-
 for directionIdx = 1:numDirections
     posXDirection = squeeze(xTestIntervals(:,:,directionIdx));
     posYDirection = squeeze(yTestIntervals(:,:,directionIdx));
-
+    
     numTimeWindows = ((endBin - startBin) / timeBin) + 1;
     for timeWindowIdx = 1:numTimeWindows
         % Demean the position data at the current time window.
         demeanedX = posXDirection(:, timeWindowIdx) - mean(posXDirection(:, timeWindowIdx));
         demeanedY = posYDirection(:, timeWindowIdx) - mean(posYDirection(:, timeWindowIdx));
-
+        
         % Extract firing rates corresponding to the current time window and direction.
         windowedFiringRates = aggregatedFiringRates(timeBinsForFiring <= testingTimeBins(timeWindowIdx), directionLabels == directionIdx);
         [pcaEigenVectors, ~] = performPCA(windowedFiringRates);
-
+        
         % Project the windowed firing data onto principal components.
         Z = pcaEigenVectors(:, 1:numPCADimensions)' * (windowedFiringRates - mean(windowedFiringRates, 1));
-
-        % Expand Z with polynomial features
-        Z_poly = [];
-        for p = 1:polyDegree
-            Z_poly = [Z_poly; Z.^p];
-        end
-
-        % Compute regression coefficients for the X and Y positions using polynomial features
-        Bx = (Z_poly * Z_poly') \ (Z_poly * demeanedX);
-        By = (Z_poly * Z_poly') \ (Z_poly * demeanedY);
-
-        % Store PCR regression coefficients and mean firing rates
+        
+        % Compute regression coefficients for the X and Y positions.
+        Bx = (pcaEigenVectors(:,1:numPCADimensions) * inv(Z*Z') * Z) * demeanedX;
+        By = (pcaEigenVectors(:,1:numPCADimensions) * inv(Z*Z') * Z) * demeanedY;
+        
+        % Store PCR regression coefficients and mean firing rates.
         modelParameters.pcr(directionIdx, timeWindowIdx).bx = Bx;
         modelParameters.pcr(directionIdx, timeWindowIdx).by = By;
         modelParameters.pcr(directionIdx, timeWindowIdx).fMean = mean(windowedFiringRates, 1);
         modelParameters.averages(timeWindowIdx).avX = squeeze(mean(meanPosX, 1));
         modelParameters.averages(timeWindowIdx).avY = squeeze(mean(meanPosY, 1));
     end
+end
+
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -274,5 +275,4 @@ function [meanPosX, meanPosY, resampledPosX, resampledPosY] = getPaddedAndResamp
             resampledPosY(trialIdx,:,directionIdx) = tempPosY(1:binInterval:end);
         end
     end
-end
 end

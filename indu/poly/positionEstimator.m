@@ -83,11 +83,7 @@ if trialDuration <= 560
     for d = 1:polyDegree
         polyFiringVector = polyFiringVector + (firingVector - mean(meanFiringPCR)).^d;
     end
-    
-    % Verify dimensions
-    size(polyFiringVector')  % Should be 70 x N (e.g., 70 x 1)
-    size(regressionCoeffX)   % Should be 70 x 1
-    
+
     % Predict position using polynomial regression
     predictedX = polyFiringVector' * regressionCoeffX + averagePosX;
     predictedY = polyFiringVector' * regressionCoeffY + averagePosY;
@@ -233,45 +229,7 @@ function trialsWithRates = computeFiringRates(binnedTrials, binSize, gaussianSca
     end
 end
 
-function predictedLabel = getKNNs(testProjection, trainingProjection, ldaDimension, neighborhoodFactor)
-% GETKNNs Determines the reaching direction using a k-Nearest Neighbors approach.
-%   This function computes the Euclidean distances between the test projection
-%   and training projection data, then uses the kNN algorithm to assign a label.
-%
-%   Inputs:
-%       testProjection     - Projection of test data (after PCA-LDA).
-%       trainingProjection - Projection of training data (after PCA-LDA).
-%       ldaDimension       - Number of LDA dimensions used.
-%       neighborhoodFactor - Factor to adjust the number of nearest neighbors.
-%
-%   Output:
-%       predictedLabel     - Predicted reaching direction label.
 
-    trainingMatrix = trainingProjection';
-    testingMatrix = testProjection;
-    trainingSquared = sum(trainingMatrix .* trainingMatrix, 2);
-    testingSquared = sum(testingMatrix .* testingMatrix, 1);
-    
-    % Compute the squared Euclidean distance between each test and training point.
-    distanceMatrix = trainingSquared(:, ones(1, length(testingMatrix))) + ...
-                     testingSquared(ones(1, length(trainingMatrix)), :) - ...
-                     2 * trainingMatrix * testingMatrix;
-    distanceMatrix = distanceMatrix';
-    
-    % Determine the k nearest neighbors.
-    k = 25;  % Fixed number of neighbors.
-    [~, sortedIndices] = sort(distanceMatrix, 2);
-    nearestNeighbors = sortedIndices(:, 1:k);
-    
-    % Map training trials to their corresponding direction labels.
-    numTrialsPerDirection = size(trainingProjection, 2) / 8;
-    directionLabels = [ones(1, numTrialsPerDirection), 2*ones(1, numTrialsPerDirection), ...
-                       3*ones(1, numTrialsPerDirection), 4*ones(1, numTrialsPerDirection), ...
-                       5*ones(1, numTrialsPerDirection), 6*ones(1, numTrialsPerDirection), ...
-                       7*ones(1, numTrialsPerDirection), 8*ones(1, numTrialsPerDirection)]';
-    nearestLabels = reshape(directionLabels(nearestNeighbors), [], k);
-    predictedLabel = mode(mode(nearestLabels, 2));
-end
 end
 
 

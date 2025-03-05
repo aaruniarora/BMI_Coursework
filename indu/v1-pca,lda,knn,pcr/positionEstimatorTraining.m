@@ -113,7 +113,7 @@ end
 T_max = T_max - end_remove - start;
 T_max = ceil(T_max / 20) * 20;
 % Downsample to 20ms bins
-num_bins = floor(T_max / bin_size)
+num_bins = floor(T_max / bin_size);
 
 % Define parameters
 sigma = 20; % Standard deviation of Gaussian window (in ms)

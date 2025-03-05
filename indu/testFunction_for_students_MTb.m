@@ -1,4 +1,5 @@
 % Test Script to give to the students, March 2015
+% clc; clear; close all;
 %% Continuous Position Estimator Test Script
 % This function first calls the function "positionEstimatorTraining" to get
 % the relevant modelParameters, and then calls the function
@@ -6,7 +7,10 @@
 
 function RMSE = testFunction_for_students_MTb(teamName)
 
-load monkeydata_training.mat
+% Star time
+tic
+
+load monkeydata_training.mat%monkeydata0.mat
 
 % Set random number generator
 rng(2013);
@@ -17,8 +21,6 @@ addpath(teamName);
 % Select training and testing data (you can choose to split your data in a different way if you wish)
 trainingData = trial(ix(1:50),:);
 testData = trial(ix(51:end),:);
-% testData = trial(ix(99:end),:);
-% testData = trial(51,:);
 
 fprintf('Testing the continuous position estimator...')
 
@@ -32,7 +34,6 @@ grid
 
 % Train Model
 modelParameters = positionEstimatorTraining(trainingData);
-disp('done')
 
 for tr=1:size(testData,1)
     display(['Decoding block ',num2str(tr),' out of ',num2str(size(testData,1))]);
@@ -65,16 +66,21 @@ for tr=1:size(testData,1)
         n_predictions = n_predictions+length(times);
         hold on
         plot(decodedHandPos(1,:),decodedHandPos(2,:), 'r');
-        % disp(decodedHandPos)
         plot(testData(tr,direc).handPos(1,times),testData(tr,direc).handPos(2,times),'b')
     end
 end
 
 legend('Decoded Position', 'Actual Position')
 
-RMSE = sqrt(meanSqError/n_predictions) ;
+RMSE = sqrt(meanSqError/n_predictions) 
+
+% End timing and store the result
+elapsedTime = toc;  
 
 rmpath(genpath(teamName))
-assignin('base', 'handPos', decodedHandPos);
+
+% Display the elapsed time
+fprintf('Execution time: %.2f seconds\n', elapsedTime);
+fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
 
 end
