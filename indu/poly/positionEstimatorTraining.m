@@ -13,7 +13,7 @@ function [modelParameters, aggregatedFiringRates] = positionEstimatorTraining(tr
 % ------------------------- Initialization -------------------------
 numDirections = 8;                    % number of movement directions
 timeBin = 20;                         % binning interval (in ms)
-gaussianScale = 50;                   % scaling factor for Gaussian smoothing
+gaussianScale = 40;                   % scaling factor for Gaussian smoothing
 numTrainingTrials = length(trainingData); % total number of training trials
 
 % Preprocess spike data: binning and square-root transformation
@@ -269,7 +269,7 @@ function [meanPosX, meanPosY, resampledPosX, resampledPosY] = getPaddedAndResamp
             % Downsample the padded trajectory based on binInterval.
             tempPosX = meanPosX(trialIdx,:,directionIdx);
             % (Note: the original logic uses the same data for Y)
-            tempPosY = meanPosX(trialIdx,:,directionIdx);
+            tempPosY = meanPosY(trialIdx,:,directionIdx);
             resampledPosX(trialIdx,:,directionIdx) = tempPosX(1:binInterval:end);
             resampledPosY(trialIdx,:,directionIdx) = tempPosY(1:binInterval:end);
         end

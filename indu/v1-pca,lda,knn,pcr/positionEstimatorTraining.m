@@ -1,11 +1,11 @@
-% clc
-% clear all
-% 
-% load('monkeydata_training.mat');
-% num = 80;
-% training_data = trial(1:num, :);   % First 10 trials for training
-% testData = trial(num+1:end, :);  
-function [model_params, firing_data] = positionEstimatorTraining(training_data)
+clc
+clear all
+
+load('monkeydata_training.mat');
+num = 2;
+training_data = trial(1:num, :);   % First 10 trials for training
+testData = trial(num+1:end, :);  
+% function [model_params, firing_data] = positionEstimatorTraining(training_data)
 %%
 clc
 model_params = struct;
@@ -73,8 +73,8 @@ function [beta_x_all, beta_y_all, unique_angles, mean_x, mean_y] = trainAngleWis
 
         for j = 1:num_bins
             % Extract the j-th bin across trials
-            Y_x = Y_selected(1:2:end, j)-mean(Y_selected(1:2:end, j)); % X coordinates for the j-th bin
-            Y_y = Y_selected(2:2:end, j)-mean( Y_selected(2:2:end, j)); % Y coordinates for the j-th bin
+            Y_x = Y_selected(1:2:end, j);%-mean(Y_selected(1:2:end, j)); % X coordinates for the j-th bin
+            Y_y = Y_selected(2:2:end, j);%-mean( Y_selected(2:2:end, j)); % Y coordinates for the j-th bin
 
             mean_X_a = mean(Y_selected(1:2:end, j)); % Mean across trials
             mean_Y_a = mean(Y_selected(2:2:end, j));
@@ -93,11 +93,16 @@ function [beta_x_all, beta_y_all, unique_angles, mean_x, mean_y] = trainAngleWis
             % beta_y_all{i, j} = s_pca \ Y_y;  
             mean_x{i, j} = mean_X_a;
             mean_y{i, j} = mean_Y_a;
+
+            % Debugging statements
+            fprintf('Angle: %d, Bin: %d\n', unique_angles(i), j);
+            fprintf('Mean X: %f, Mean Y: %f\n', mean_X_a, mean_Y_a);
+            fprintf('Beta X: %s\n', mat2str(beta_x_all{i, j}));
+            fprintf('Beta Y: %s\n', mat2str(beta_y_all{i, j}));
         end
     end
 end
 %%
-
 function [X_data, Y_data, num_bins] = preprocessing(t_data, num_trials, num_angles, bin_size)
 start = 301;
 end_remove = 100;
@@ -117,7 +122,12 @@ num_bins = floor(T_max / bin_size);
 
 % Define parameters
 sigma = 20; % Standard deviation of Gaussian window (in ms)
-window = fspecial('gaussian', [1, 5*sigma], sigma); % Gaussian kernel
+filter_size = ceil(5 * sigma); % Define filter size
+
+% Create Gaussian window manually
+t = -filter_size:filter_size;
+window = exp(-t.^2 / (2 * sigma^2));
+window = window / sum(window); % Normalize
 
 X_data = []; % Initialize feature matrix
 Y_data = []; % Initialize combined Y matrix
@@ -127,7 +137,7 @@ for angle = 1:num_angles
         % Extract spike train and corresponding hand positions
         spikes = t_data(t, angle).spikes;   % 98 x T binary matrix
         handPos = t_data(t, angle).handPos; % 3 x T position matrix (X, Y, Z)
-
+   
         % Truncate from 301:T_max
         spikes = spikes(:, start:end-end_remove);
         handPos = handPos(1:2, start:end-end_remove); % Only take X and Y
@@ -148,7 +158,6 @@ for angle = 1:num_angles
 
         % Convolve each neuron's spike train with Gaussian kernel
         smoothed_spikes = conv2(spikes, window, 'same'); % 98 x T_max
-
 
         firing_rates = zeros(size(spikes, 1), num_bins); % 98 x num_bins
 
@@ -176,11 +185,12 @@ for angle = 1:num_angles
         X_data = [X_data; feature_vector]; % Feature matrix
 
         % Arrange X and Y alternately in Y_data
-        Y_data = [Y_data; Y_x_binned; Y_y_binned]; 
+        Y_data = [Y_data; Y_x_binned; Y_y_binned];
     end
 end
 X_data = X_data * 1000; % Scale firing rates
 end
+
 %%
 function [score, coeff] = covPCA(X, numPC)
     % Compute PCA: center the data, get covariance, then the top nPC eigenvectors.
@@ -408,4 +418,4 @@ for i = 1:length(angle_labels)
 end
 end
 
- end
+ % end

@@ -6,11 +6,11 @@
 % "positionEstimator" to decode the trajectory. 
 
 function RMSE = testFunction_for_students_MTb(teamName)
-
+clc
 % Star time
 tic
 
-load monkeydata_training.mat%monkeydata0.mat
+load monkeydata_training.mat %monkeydata0.mat
 
 % Set random number generator
 rng(2013);
@@ -20,7 +20,7 @@ addpath(teamName);
 
 % Select training and testing data (you can choose to split your data in a different way if you wish)
 trainingData = trial(ix(1:50),:);
-testData = trial(ix(51:end),:);
+testData = trial(ix(99:end),:);
 
 fprintf('Testing the continuous position estimator...')
 
@@ -67,6 +67,10 @@ for tr=1:size(testData,1)
         hold on
         plot(decodedHandPos(1,:),decodedHandPos(2,:), 'r');
         plot(testData(tr,direc).handPos(1,times),testData(tr,direc).handPos(2,times),'b')
+        % disp('direction actual')
+        % disp(direc)
+
+        
     end
 end
 

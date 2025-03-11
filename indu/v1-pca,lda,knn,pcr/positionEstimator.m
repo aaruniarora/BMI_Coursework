@@ -191,8 +191,8 @@ function [x, y] = predictHandPositionByAngleXY(d_reduced_new, predicted_angle, b
         beta_y = beta_y_all{angle_idx, bin};
 
         % Predict X and Y positions separately (No Bias Term)
-        predicted_X(bin) = d_reduced_new* beta_x+mean_X_pos{angle_idx,bin}; % Predicted X at this bin
-        predicted_Y(bin) = d_reduced_new* beta_y+mean_Y_pos{angle_idx,bin}; % Predicted Y at this bin
+        predicted_X(bin) = d_reduced_new* beta_x;%+mean_X_pos{angle_idx,bin}; % Predicted X at this bin
+        predicted_Y(bin) = d_reduced_new* beta_y;%+mean_Y_pos{angle_idx,bin}; % Predicted Y at this bin
     end
     % Output the last value in the predicted hand positions
     try
