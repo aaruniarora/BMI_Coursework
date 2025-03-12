@@ -2,7 +2,7 @@ clc
 clear all
 
 load('monkeydata_training.mat');
-num = 2;
+num = 50;
 training_data = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 % function [model_params, firing_data] = positionEstimatorTraining(training_data)
@@ -29,6 +29,7 @@ lda_no = 3;
 [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC,lda_no);
 model_params.lda_no = lda_no;
 model_params.lda_component = lda_component;
+size(lda_component)
 
 [cluster_centroids, cluster_idx, cluster_angle_mapping, reach_angles] = applykmeans(lda_component,predicted_labels,angle_labels);
 model_params.cluster_idx = cluster_idx;

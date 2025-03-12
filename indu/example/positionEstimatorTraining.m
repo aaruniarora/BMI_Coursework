@@ -103,7 +103,7 @@ for currentTimeBinLimit = timeBinLimits
                        7*ones(1, numTrainingTrials), 8*ones(1, numTrainingTrials)];
     
     % --------------------- Principal Component Analysis (PCA) ---------------------
-    [principalComponents, eigenValues] = performSVDPCA(aggregatedFiringRates);
+    [principalComponents,numPCADimensions, eigenValues] = performSVDPCA(aggregatedFiringRates);
     
     % Compute class means for each direction
     classMeanMatrix = zeros(size(aggregatedFiringRates,1), numDirections);
@@ -118,7 +118,7 @@ for currentTimeBinLimit = timeBinLimits
     withinClassScatter   = totalScatter - betweenClassScatter;
     
     % Dimensions to keep
-    numPCADimensions = 30;
+    % numPCADimensions = 30;
     numLDADimensions = 6;
     
     % ----------------- Linear Discriminant Analysis (LDA) -----------------
@@ -167,18 +167,18 @@ for directionIdx = 1:numDirections
     numTimeWindows = ((endBin - startBin) / timeBin) + 1;
     for timeWindowIdx = 1:numTimeWindows
         % Demean the position data at the current time window
-        demeanedX = posXDirection(:, timeWindowIdx) - mean(posXDirection(:, timeWindowIdx));
-        demeanedY = posYDirection(:, timeWindowIdx) - mean(posYDirection(:, timeWindowIdx));
-        
+        demeanedX = bsxfun(@minus,posXDirection(:, timeWindowIdx), mean(posXDirection(:, timeWindowIdx)));
+        demeanedY = bsxfun(@minus,posYDirection(:, timeWindowIdx),mean(posYDirection(:, timeWindowIdx)));
+
         % Extract firing rates for this direction & time window
         windowedFiringRates = aggregatedFiringRates(timeBinsForFiring <= testingTimeBins(timeWindowIdx), ...
                                                     directionLabels == directionIdx);
         
         % PCA on windowed firing data
-        [pcaEigenVectors, ~] = performSVDPCA(windowedFiringRates);
+        [pcaEigenVectors, numPCADimensions,~] = performSVDPCA(windowedFiringRates);
         
         % Project the firing data onto principal components
-        numPCADimensions = 30;  % consistent with earlier usage
+        % numPCADimensions = 30;  % consistent with earlier usage
         Z = pcaEigenVectors(:, 1:numPCADimensions)' * (windowedFiringRates - mean(windowedFiringRates, 1));
         
         % Compute regression coefficients for X and Y
@@ -192,6 +192,8 @@ for directionIdx = 1:numDirections
         
         modelParameters.averages(timeWindowIdx).avX = squeeze(mean(meanPosX, 1));
         modelParameters.averages(timeWindowIdx).avY = squeeze(mean(meanPosY, 1));
+
+        assignin('base','reg_mahad',modelParameters.pcr(directionIdx,timeWindowIdx).bx)
     end
 end
 
@@ -294,10 +296,10 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Function: performSVDPCA
 % Performs PCA via Singular Value Decomposition (SVD).
-function [principalComponents, eigenValues, sortIndices, eigenVectors] = performSVDPCA(dataMatrix)
+function [principalComponents,numPC, eigenValues, sortIndices, eigenVectors] = performSVDPCA(dataMatrix)
     % Center each row
     centeredData = dataMatrix - mean(dataMatrix, 2);
-    
+    pcathreshold = 0.48;
     % SVD
     [U, S, V] = svd(centeredData, 'econ');
     
@@ -305,11 +307,19 @@ function [principalComponents, eigenValues, sortIndices, eigenVectors] = perform
     s = diag(S);
     eigenVals = (s.^2) / size(dataMatrix,2);  % Convert singular values to eigenvalues
     eigenValues = diag(eigenVals);
-    sortIndices = 1:length(s);  % Already sorted
+    % Compute cumulative variance
+    cumulativeVariance = cumsum(eigenVals) / sum(eigenVals);
     
-    % Project data onto the new basis
+    % Determine number of principal components to retain
+    numPC = find(cumulativeVariance >= pcathreshold, 1);
+    
+    % Keep only the top numPC components
+    eigenVectors = eigenVectors(:, 1:numPC);
     principalComponents = centeredData * eigenVectors;
     principalComponents = principalComponents ./ sqrt(sum(principalComponents.^2, 1)); 
+    
+    % Sort indices (since SVD already provides sorted singular values)
+    sortIndices = 1:numPC;
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

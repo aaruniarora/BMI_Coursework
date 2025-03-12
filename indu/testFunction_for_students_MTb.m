@@ -6,7 +6,6 @@
 % "positionEstimator" to decode the trajectory. 
 
 function RMSE = testFunction_for_students_MTb(teamName)
-clc
 % Star time
 tic
 
@@ -38,7 +37,7 @@ modelParameters = positionEstimatorTraining(trainingData);
 for tr=1:size(testData,1)
     display(['Decoding block ',num2str(tr),' out of ',num2str(size(testData,1))]);
     pause(0.001)
-    for direc=randperm(8) 
+    for direc=randperm(8)
         decodedHandPos = [];
 
         times=320:20:size(testData(tr,direc).spikes,2);
@@ -67,9 +66,11 @@ for tr=1:size(testData,1)
         hold on
         plot(decodedHandPos(1,:),decodedHandPos(2,:), 'r');
         plot(testData(tr,direc).handPos(1,times),testData(tr,direc).handPos(2,times),'b')
-        % disp('direction actual')
-        % disp(direc)
-
+        if ~all( newParameters.actualLabel == newParameters.actualLabel(1))
+        disp('direction labels')
+        disp(newParameters.actualLabel)
+        end
+        % disp(decodedHandPos)
         
     end
 end
