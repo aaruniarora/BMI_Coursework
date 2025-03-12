@@ -142,7 +142,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     
         % Loop through each time window to calculate regression coefficients.
         % These coefficients are used to predict hand positions from neural data.
-    
+        % disp(directionIndex)
         for timeWindowIndex = 1:((stop_idx-start_idx)/bin_group)+1
     
              % Calculate regression coefficients and the windowed firing rates for the current time window and direction.
@@ -151,8 +151,10 @@ function modelParameters = positionEstimatorTraining(training_data)
             % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
             
             % Store the calculated regression coefficients and the mean windowed firing rates in the model parameters structure.
-            modelParameters.pcr(directionIndex,timeWindowIndex).bx = regressionCoefficientsX;
-            modelParameters.pcr(directionIndex,timeWindowIndex).by = regressionCoefficientsY;
+            x_add = 2;
+            y_add = 1.5;
+            modelParameters.pcr(directionIndex,timeWindowIndex).bx = regressionCoefficientsX*x_add;
+            modelParameters.pcr(directionIndex,timeWindowIndex).by = regressionCoefficientsY*y_add;
             modelParameters.pcr(directionIndex,timeWindowIndex).fMean = mean(windowedFiring,1);
             modelParameters.pcr(directionIndex,timeWindowIndex).fstd = std(windowedFiring,0,2);
 
