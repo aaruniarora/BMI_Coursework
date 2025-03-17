@@ -246,8 +246,8 @@ end
 
 %% Helper function for position calculation
 function pos = calculatePosition(neuraldata, meanFiring, b, av, curr_bin)
-    % pos = (neuraldata(1:length(b)) - mean(meanFiring))' * b + av;
-    pos = ((neuraldata(1:length(b)) - meanFiring))' * b + av;
+    pos = (neuraldata(1:length(b)) - mean(meanFiring))' * b + av;
+    % pos = ((neuraldata(1:length(b)) - meanFiring))' * b + av;
     try
         pos = pos(curr_bin, 1);
     catch

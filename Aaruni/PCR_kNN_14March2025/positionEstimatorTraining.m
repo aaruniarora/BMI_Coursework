@@ -27,7 +27,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     reaching_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] .* pi;
     bin_group = 20;
     alpha = 0.35; % arbitrary value decided through multiple trials
-    sigma = 50;  % standard deviation in ms
+    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = 320; 
 
     % Determine the minimum spike length across all trials to ensure we don't exceed array bounds.
@@ -52,7 +52,6 @@ function modelParameters = positionEstimatorTraining(training_data)
 
     %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smotthing
     preprocessed_data = preprocessing(training_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
-    assignin('base', 'preprocessed_data', preprocessed_data); 
     orig_neurons = size(preprocessed_data(1,1).rate, 1);
 
     %% Remove data from neurons with low firing rates.
@@ -75,7 +74,6 @@ function modelParameters = positionEstimatorTraining(training_data)
 
         %% PCA for dimensionality reduction of the neural data
         [coeff, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
-        % score = (score - mean(score, 2))/std(score, 2);
 
         %% LDA to maximise class separability across different directions
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
@@ -89,10 +87,6 @@ function modelParameters = positionEstimatorTraining(training_data)
     
         modelParameters.classify(curr_bin).mean_firing = mean(spikes_matrix, 2);
         modelParameters.classify(curr_bin).labels_kNN = labels(:)';
-
-        % disp(['At bin=',num2str(curr_bin), ...
-        %       ', spikes_matrix is ', num2str(size(spikes_matrix,1)), ' x ', num2str(size(spikes_matrix,2))]);
-        % disp(['Mean firing is ', num2str(size(mean(spikes_matrix, 2))), ' x ', num2str(size(mean(spikes_matrix, 2)))]);
     end
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
@@ -102,34 +96,29 @@ function modelParameters = positionEstimatorTraining(training_data)
     time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
     Interval = start_idx:bin_group:stop_idx;
 
-    % Loop through each direction to model hand positions separately for each.
-    
-    for directionIndex = 1:length(reaching_angles)
+    % modelling hand positions separately for each direction
+    for dir_idx = 1:length(reaching_angles)
     
         % Extract the current direction's hand position data for all trials.
-        currentXPositions = formatted_xPos(:,:,directionIndex);
-        currentYPositions = formatted_yPos(:,:,directionIndex);
+        currentXPositions = formatted_xPos(:,:,dir_idx);
+        currentYPositions = formatted_yPos(:,:,dir_idx);
     
         % Loop through each time window to calculate regression coefficients.
         % These coefficients are used to predict hand positions from neural data.
-    
-        for timeWindowIndex = 1:((stop_idx-start_idx)/bin_group)+1
+        for win_idx = 1:((stop_idx-start_idx)/bin_group)+1
     
             % Calculate regression coefficients and the windowed firing rates for the current time window and direction.
-    
-            [regressionCoefficientsX, regressionCoefficientsY, windowedFiring] = calcRegressionCoefficients(timeWindowIndex, time_division, labels, directionIndex, spikes_matrix, pca_threshold, Interval, currentXPositions, currentYPositions);
+            [reg_coeff_X, reg_coeff_Y, win_firing] = calcRegressionCoefficients(win_idx, time_division, labels, dir_idx, spikes_matrix, pca_threshold, Interval, currentXPositions, currentYPositions);
             % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
             
             % Store the calculated regression coefficients and the mean windowed firing rates in the model parameters structure.
-            modelParameters.pcr(directionIndex,timeWindowIndex).bx = regressionCoefficientsX;
-            modelParameters.pcr(directionIndex,timeWindowIndex).by = regressionCoefficientsY;
-            modelParameters.pcr(directionIndex,timeWindowIndex).fMean = mean(windowedFiring,2);
+            modelParameters.pcr(dir_idx,win_idx).bx = reg_coeff_X;
+            modelParameters.pcr(dir_idx,win_idx).by = reg_coeff_Y;
+            modelParameters.pcr(dir_idx,win_idx).fMean = mean(win_firing,2);
     
-            % Store the average hand positions across all trials for each time window.
-            % These averages can be useful for evaluating the model's performance.
-    
-            modelParameters.averages(timeWindowIndex).avX = squeeze(mean(xPos,1));
-            modelParameters.averages(timeWindowIndex).avY = squeeze(mean(yPos,1));
+            % Store the average hand positions across all trials for each time window.   
+            modelParameters.averages(win_idx).avX = squeeze(mean(xPos,1));
+            modelParameters.averages(win_idx).avY = squeeze(mean(yPos,1));
             
         end
     end    
@@ -140,17 +129,21 @@ end
 % HELPER FUNCTIONS %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, method)
+function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing trials in the following manner:
-    % 1. Bin data to get the firing rate
-    % 2. Apply square root transformation
-    % 3. Smooth using a recursive filter, exponential moving average (EMA),
+    % 1. Pad each trial’s spikes out to max_time_length
+    % 2. Bin data to get the firing rate
+    % 3. Apply square root transformation
+    % 4. Smooth using a recursive filter, exponential moving average (EMA),
     % or gaussian filter
 % Inputs:
     % training_data: input training data containing the spikes and hand positions
     % bin_group: binning resolution in milliseconds
+    % filter_type: choose between 'EMA' and 'Gaussian' filtering
     % alpha: Smoothing factor (0 < alpha <= 1). A higher alpha gives more weight to the current data point.
+    % sigma: gaussian filtering window
+    % debug: plots if debug=='debug'
 % Output:
     % preprocessed_data: preprocessed dataset with spikes and hand positions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -223,7 +216,7 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
         end
     end
     
-    if strcmp(method, 'debug')
+    if strcmp(debug, 'debug')
         plot_r = 1; plot_c = 1; plot_n =1;
         figure; sgtitle('After preprocessing');
         subplot(1,2,1); hold on;
@@ -241,6 +234,7 @@ end
 
 
 function ema_spikes = ema_filter(sqrt_spikes, alpha, num_neurons)
+    % Runs exponential moving average filter on the given data
     ema_spikes = zeros(size(sqrt_spikes)); 
     for n = 1:num_neurons
         for t = 2:size(sqrt_spikes, 2)
@@ -264,9 +258,17 @@ end
 
 function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Arranging data as:
+% Rearranging data as:
 % rows: 2744 time points --> 98 neurons x 28 bins
 % cols: 800 --> 8 angles and 100 trials so angle 1, trial 1; angle 1, trial 2; ...; angle 8, Trial 100
+% Inputs:
+    % preprocessed_data: input training data containing the spikes and hand positions
+    % neurons: number of input neurons
+    % curr_bin: current bin resolution in milliseconds
+    % debug: plots firing rate for the current bin
+% Outputs:
+    % spikes_matrix: rearranged data
+    % labels: direction labels for spikes_matrix (column matrix)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     [rows, cols] = size(preprocessed_data);
     labels = zeros(rows * cols, 1);
@@ -291,17 +293,14 @@ end
 
 
 function removed_neurons = remove_neurons(spike_matrix, neurons, debug)
-% Remove neurons with very low average firing rate for numerical stability.
-    removed_neurons = []; %{}
-    % low_fr = [];
+    % Remove neurons with very low average firing rate for numerical stability.
+    removed_neurons = []; 
     for neuronIdx = 1:neurons
         avgFiringRate = mean(mean(spike_matrix(neuronIdx:neurons:end, :)));
         if avgFiringRate < 0.5
-            % low_fr = [low_fr, neuronIdx];
             removed_neurons = [removed_neurons, neuronIdx]; 
         end
     end
-    % removed_neurons{end+1} = low_fr;
 
     if strcmp(debug, 'debug')
         disp(removed_neurons);
@@ -408,13 +407,27 @@ function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, training
     end
 end
 
+function data = fill_nan(data)
+    % Forward fill
+    for i = 2:length(data)
+        if isnan(data(i))
+            data(i) = data(i-1);
+        end
+    end
+    % Backward fill for any remaining NaNs
+    for i = length(data)-1:-1:1
+        if isnan(data(i))
+            data(i) = data(i+1);
+        end
+    end
+end
 
 function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bin_group, bins)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Hand Position Preprocessing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    handPos_cells = {training_data.handPos};          % Extract handPos fields into a cell array
+    handPos_cells = {training_data.handPos};
     max_trajectory = max(cellfun(@(hp) size(hp, 2), handPos_cells));
     clear handPos_cells;
 
@@ -430,6 +443,10 @@ function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(train
             curr_x = training_data(r,c).handPos(1,:);% - mean(training_data(r,c).handPos(1,:)); %training_data(r,c).handPos(1,301);
             curr_y = training_data(r,c).handPos(2,:);% - mean(training_data(r,c).handPos(2,:)); %training_data(r,c).handPos(2,301);
             
+            % Fill missing values in hand position
+            % curr_x = fill_nan(curr_x);
+            % curr_y = fill_nan(curr_y);
+
             if size(training_data(r,c).handPos,2) < max_trajectory
                 pad_size = max_trajectory - size(training_data(r,c).handPos,2);
                 if pad_size > 0
