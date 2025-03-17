@@ -1,0 +1,15 @@
+{"time":"2025-03-16T08:36:44.5972816Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250316_083644-tsezxxtv\\logs\\debug-core.log"}
+{"time":"2025-03-16T08:36:44.880748Z","level":"INFO","msg":"created new stream","id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:44.880748Z","level":"INFO","msg":"stream: started","id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:44.880748Z","level":"INFO","msg":"writer: Do: started","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:44.880748Z","level":"INFO","msg":"handler: started","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:44.880748Z","level":"INFO","msg":"sender: started","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:45.2098313Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-16T08:36:45.7260206Z","level":"INFO","msg":"stream: closing","id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:45.7260206Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-16T08:36:45.7281234Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-16T08:36:46.6761786Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-16T08:36:46.9144588Z","level":"INFO","msg":"handler: closed","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:46.9144588Z","level":"INFO","msg":"sender: closed","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:46.9144588Z","level":"INFO","msg":"writer: Close: closed","stream_id":"tsezxxtv"}
+{"time":"2025-03-16T08:36:46.9149805Z","level":"INFO","msg":"stream: closed","id":"tsezxxtv"}

@@ -86,6 +86,8 @@ function modelParameters = positionEstimatorTraining(training_data)
     % modelParameters.kmean_c.kMeansCentroids = centroids;
 
     %%
+    pca_threshold = 0.44;
+    lda_dim = 6;
 
     for curr_bin = 1: length(num_bins)
         %% Extract features/restructure data for further analysis
@@ -95,12 +97,12 @@ function modelParameters = positionEstimatorTraining(training_data)
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-        pca_threshold = 0.45; % =40 for cov and =0.95 for svd
+     % =40 for cov and =0.95 for svd
         [coeff, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
         % disp(nPC)
 
         %% LDA to maximise class separability across different directions
-        lda_dim = 6;
+     
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
 
 
@@ -151,11 +153,11 @@ function modelParameters = positionEstimatorTraining(training_data)
             % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
             
             % Store the calculated regression coefficients and the mean windowed firing rates in the model parameters structure.
-            x_add = 2;
-            y_add = 1.5;
+            x_add = 1;
+            y_add = 1;
             modelParameters.pcr(directionIndex,timeWindowIndex).bx = regressionCoefficientsX*x_add;
             modelParameters.pcr(directionIndex,timeWindowIndex).by = regressionCoefficientsY*y_add;
-            modelParameters.pcr(directionIndex,timeWindowIndex).fMean = mean(windowedFiring,1);
+            modelParameters.pcr(directionIndex,timeWindowIndex).fMean = mean(windowedFiring,2);
             modelParameters.pcr(directionIndex,timeWindowIndex).fstd = std(windowedFiring,0,2);
 
             assignin('base','reg',modelParameters.pcr(directionIndex,timeWindowIndex).bx)
@@ -599,7 +601,7 @@ function [regressionCoefficientsX, regressionCoefficientsY, FilteredFiring ] = c
     FilteredFiring = filterFiringData(neuraldata, timeDivision, Interval(timeWindowIndex), labels, directionIndex);
 
     % Center the firing data by subtracting the mean of each neuron's firing rate
-    centeredWindowFiring = (FilteredFiring  - mean(FilteredFiring ,1))./std(FilteredFiring,1);
+    centeredWindowFiring = (FilteredFiring  - mean(FilteredFiring ,1));%./std(FilteredFiring,1);
 
     % Perform PCA on the centered firing data to reduce dimensionality
     [~, principalVectors, ~] = perform_PCA(centeredWindowFiring, pca_dimension, 'cov', 'nodebug');

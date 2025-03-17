@@ -24,13 +24,13 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     sigma = 50;  % standard deviation in ms for gaussian
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
-    dir_stop = 460;
+    % dir_stop = 460;
 
     % Soft kNN parameters
-    k = 8; % 8 for hard kNN and 20 for soft
-    pow = 2; 
+    k = 20; % 8 for hard kNN and 20 for soft
+    pow = 1; 
     alp = 1e-6;
-    confidence_threshold = 0.5;
+    % confidence_threshold = 0.5;
 
     if ~isfield(modelParameters, 'actualLabel')
         modelParameters.actualLabel = []; % Default label
@@ -54,42 +54,15 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
    %% Reshape dataset
    spikes_test = reshape(spikes_test, [], 1);
 
-   % %% KMEANS
-   % %% PCA + LDA Transformation (Apply to test data)
-   %  % Apply PCA and LDA transformations (weights learned during training)
-   %  pca_weights = modelParameters.kmean_pca;
-   %  lda_weights = modelParameters.kmean_lda_w;
-   % 
-   %  % spikes_test_reshaped = reshape(spikes_test, 1, []);
-   % 
-   %  % spikes_test_reshaped = reshape(spikes_test, size(pca_weights, 2), []);
-   %  spikes_test = spikes_test(1:size(pca_weights, 1)); 
-   %  pca_transformed_data = pca_weights' * spikes_test;
-   % 
-   %  lda_transformed_data = lda_weights' * pca_transformed_data;
-   % 
-   %  % Now lda_transformed_data is the feature space where clustering occurred during training.
-   % 
-   %  %% Use the stored k-means results for classification
-   %  centroids = modelParameters.kmean_c.kMeansCentroids;
-   %  clusterLabels =  modelParameters.kmean_l.kMeansLabels;
-   % 
-   %  % Find the closest centroid to the test sample (using the transformed test data)
-   %  distances = sum((lda_transformed_data' - centroids).^2, 2);  % Euclidean distance to centroids
-   %  [~, predicted_label] = min(distances) % Assign to the closest cluster
-   % 
-   %  % Classify the corresponding angle
-   %  reaching_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] .* pi;
-   %  predicted_angle = reaching_angles(clusterLabels(predicted_label));
-
    %%
 
-    function [outLabel,confidence] = classify_angle(train_weight,test_weight,meanFiringTrain)
+    function [outLabel] = classify_angle(train_weight,test_weight,meanFiringTrain)
       
       test_weight = test_weight' * (spikes_test(:) - meanFiringTrain(:));
       % Play around with hard and soft kNN. Soft kNN also has dist and exp types!
-      [outLabel, confidence] = getKNNs_confidence3(test_weight, train_weight,'euclidean');
-      % [outLabel, confidence] = KNN_classifier(test_weight, train_weight, k, confidence_threshold, last_known_label, pow, alp, 'hard', 'dis');
+      % [outLabel, confidence] = getKNNs_confidence3(test_weight, train_weight,'euclidean');
+      % [outLabel, confidence] = getKNNs_confidence1(test_weight, train_weight);
+      [outLabel] = KNN_classifier(test_weight, train_weight, k, pow, alp, 'soft', 'dist');
   
     end
    
@@ -100,7 +73,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
       test_weight =  modelParameters.classify(idx).wTest;
       meanFiringTrain = modelParameters.classify(idx).mean_firing;
        
-      [outLabel,confidence] = classify_angle(train_weight,test_weight,meanFiringTrain);  
+      [outLabel] = classify_angle(train_weight,test_weight,meanFiringTrain);  
           % if confidence_threshold > confidence
       %     outLabel = round(0.7 * modelParameters.actualLabel + 0.3* outLabel);
       % end
@@ -133,12 +106,12 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
         end
     end
 
-
+    len_b_mode = 7;
     % Update the actual label in model parameters
     if ~isempty(modelParameters.actualLabel)
         
     % Accumulate stable labels before following the mode
-    if length(modelParameters.actualLabel) > 7  % Wait until there are at least 5 labels
+    if length(modelParameters.actualLabel) > len_b_mode  % Wait until there are at least 5 labels
         outLabel = mode(modelParameters.actualLabel);
     end
     modelParameters.actualLabel(end+1) = outLabel;
@@ -157,15 +130,15 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     avX = modelParameters.averages(idx).avX(:,outLabel);
     avY =  modelParameters.averages(idx).avY(:,outLabel);
     meanFiring = modelParameters.pcr(outLabel, idx).fMean;
-    stdev = modelParameters.pcr(outLabel, idx).fstd;
+    % stdev = modelParameters.pcr(outLabel, idx).fstd;
     bx = modelParameters.pcr(outLabel,idx).bx;
     by = modelParameters.pcr(outLabel,idx).by;
     % r = 2 * randi([0, 1]) - 1;
     % xStd = modelParameters.stdx * randi([0, 1])*r;
     % yStd = modelParameters.stdy * randi([0, 1])*r;
     % 
-    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin,stdev);% xStd(outLabel);
-    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin,stdev);%+ yStd(outLabel);
+    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin);% xStd(outLabel);
+    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin);%+ yStd(outLabel);
     
     %predicted = outLabel; %The predicted direction of movement
 
@@ -387,10 +360,11 @@ end
 
 
 %% Helper function for position calculation
-function pos = calculatePosition(neuraldata, meanFiring, b, av, curr_bin,stdev)
-w1 = 1;
-w2 = 1/w1;
-    pos = ((neuraldata(1:length(b)) - mean(meanFiring))./stdev)'*b*w1 + av;
+function pos = calculatePosition(neuraldata, meanFiring, b, av, curr_bin)
+% w1 = 1;
+% w2 = 1/w1;
+    % pos = ((neuraldata(1:length(b)) - mean(meanFiring))./stdev)'*b*w1 + av;
+    pos = ((neuraldata(1:length(b)) - meanFiring))'*b + av;
     % pos = adjustFinalPosition(pos, curr_bin);
 
     try
@@ -527,7 +501,7 @@ function [predictedLabel, confidence] = getKNNs_confidence2(testProjection, trai
 end
 
 
-function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN_num, confidence_threshold, last_label, pow, alp, method, type)
+function [output_lbl] = KNN_classifier(test_weight, train_weight, NN_num, pow, alp, method, type)
 
     if strcmp(method, 'hard')
     % Input:
@@ -539,7 +513,6 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
@@ -553,14 +526,14 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             modeLabel = mode(trainLabels);
             output_lbl(i) = modeLabel;
 
-            % Compute confidence (fraction of nearest neighbors voting for modeLabel)
-            confidence(i) = sum(trainLabels == modeLabel) / k;
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
-            else
-                output_lbl(i) = modeLabel;
-            end
+            % % Compute confidence (fraction of nearest neighbors voting for modeLabel)
+            % confidence(i) = sum(trainLabels == modeLabel) / k;
+            % % If confidence is below threshold, keep last known label
+            % if confidence(i) < confidence_threshold
+            %     output_lbl(i) = last_label;
+            % else
+            %     output_lbl(i) = modeLabel;
+            % end
         end
     end
 
@@ -580,7 +553,7 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
+        % confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % For the i-th test sample:
@@ -619,13 +592,12 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             [~, bestAngle] = max(p);
             output_lbl(i) = bestAngle;
 
-            % Confidence: probability of predicted label
-            confidence(i) = p(bestAngle);
-    
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
+            % % Confidence: probability of predicted label
+            % confidence(i) = p(bestAngle);
+            % 
+            % % If confidence is below threshold, keep last known label
+            % if confidence(i) < confidence_threshold
+            %     output_lbl(i) = last_label;
             end
         end
-    end
 end

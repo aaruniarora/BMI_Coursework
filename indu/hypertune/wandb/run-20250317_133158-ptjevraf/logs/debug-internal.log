@@ -1,0 +1,15 @@
+{"time":"2025-03-17T13:31:58.1497613Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250317_133158-ptjevraf\\logs\\debug-core.log"}
+{"time":"2025-03-17T13:31:58.4144756Z","level":"INFO","msg":"created new stream","id":"ptjevraf"}
+{"time":"2025-03-17T13:31:58.4144756Z","level":"INFO","msg":"stream: started","id":"ptjevraf"}
+{"time":"2025-03-17T13:31:58.4144756Z","level":"INFO","msg":"handler: started","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:31:58.4150092Z","level":"INFO","msg":"sender: started","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:31:58.4150092Z","level":"INFO","msg":"writer: Do: started","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:31:58.7249317Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-17T13:31:59.1385652Z","level":"INFO","msg":"stream: closing","id":"ptjevraf"}
+{"time":"2025-03-17T13:31:59.1385652Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-17T13:31:59.1390718Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-17T13:31:59.8216085Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-17T13:32:00.1033194Z","level":"INFO","msg":"handler: closed","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:32:00.1033194Z","level":"INFO","msg":"sender: closed","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:32:00.1033194Z","level":"INFO","msg":"writer: Close: closed","stream_id":"ptjevraf"}
+{"time":"2025-03-17T13:32:00.1039193Z","level":"INFO","msg":"stream: closed","id":"ptjevraf"}
