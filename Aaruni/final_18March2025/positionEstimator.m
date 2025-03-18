@@ -1,16 +1,5 @@
 function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % POSITION ESTIMATOR (DECODER)
-    %
-    % This function decodes the (x,y) hand position from test data using the
-    % modelParameters produced during training. It performs the same
-    % preprocessing steps (trimming, padding, Gaussian filtering, and binning)
-    % and then uses PCA, LDA, kNN, and a simple RNN update to predict the hand position.
-    %
-    % newModelParameters is returned unmodified (the RNN here is stateless).
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    % % Initial Parameters
+    %% Initial Parameters
     % clc;close all;clear;
     % load('monkeydata_training.mat')
     % test_data = trial;
@@ -21,7 +10,6 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
     bin_group = 20;
     alpha = 0.3; % ema decay
-    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
 
@@ -29,15 +17,9 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     k = 20; % 8 for hard kNN and 20 for soft
     pow = 1; 
     alp = 1e-6; 
-    confidence_threshold = 0.5;
-
-    if ~isfield(modelParameters, 'actualLabel')
-        modelParameters.actualLabel = 1; % Default label
-    end
-
 
    %% Preprocess the trial data
-   preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
+   preprocessed_test = preprocessing(test_data, bin_group, alpha);
    neurons = size(preprocessed_test(1,1).rate, 1);
 
    %% Use indexing based on data given
@@ -46,82 +28,41 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
    %%  Remove low firing neurons for PCA and PCR
    spikes_test = extract_features(preprocessed_test, neurons, curr_bin/bin_group, 'nodebug');
-   % Apply Z-score normalization
-   mu = mean(spikes_test, 2);
-   sigma = std(spikes_test, 0, 2);
-   spikes_test = (spikes_test - mu) ./ sigma;
-
    removed_neurons = modelParameters.removeneurons;
    spikes_test(removed_neurons, :) = [];
-   % neurons = orig_neurons - length(removed_neurons);
 
    %% Reshape dataset
    spikes_test = reshape(spikes_test, [], 1);
 
    %% KNN calssification
    if curr_bin <= stop_idx 
-      % Classification is applicable within the time range
       train_weight = modelParameters.classify(idx).wTrain;
       test_weight =  modelParameters.classify(idx).wTest;
       meanFiringTrain = modelParameters.classify(idx).mean_firing;
        
       test_weight = test_weight' * (spikes_test(:) - meanFiringTrain(:));
       % Play around with hard and soft kNN. Soft kNN also has dist and exp types!
-      last_known_label = modelParameters.actualLabel; % Last known direction label
-      [outLabel, confidence] = KNN_classifier(test_weight, train_weight, k, confidence_threshold, last_known_label, pow, alp, 'soft', 'dist');
-      % [outLabel, confidence] = getKNNs_confidence1(test_weight, train_weight);
-
-      if confidence_threshold > confidence
-          outLabel = round(0.7 * modelParameters.actualLabel + 0.3 * outLabel);
-      end
+      outLabel = KNN_classifier(test_weight, train_weight, k, pow, alp, 'soft', 'dist');
 
     else 
-       % Beyond maxTime, use the last known label without re-classification
        outLabel = modelParameters.actualLabel;
     end
-    modelParameters.actualLabel = outLabel; % Update the actual label in model parameters
+    modelParameters.actualLabel = outLabel; 
     
     %% Estimate position using PCR results for both within and beyond maxTime
-    % Estimate the hand position using PCR, applicable for both within the specified 
-    % time range and beyond. This step uses regression coefficients and average firing 
-    % rates to calculate the X and Y coordinates of the hand position.
-    
     avX = modelParameters.averages(idx).avX(:,outLabel);
     avY =  modelParameters.averages(idx).avY(:,outLabel);
-    mean_firing = modelParameters.pcr(outLabel, idx).f_mean;
-
-    bx_ridge = modelParameters.pcr(outLabel,idx).bx_ridge;
-    by_ridge = modelParameters.pcr(outLabel,idx).by_ridge;
-
-    bx_lasso = modelParameters.pcr(outLabel,idx).bx_lasso;
-    by_lasso = modelParameters.pcr(outLabel,idx).by_lasso;
-
-    % Ridge Regression
-    x_ridge = calculatePosition(spikes_test, mean_firing, bx_ridge, avX, curr_bin);
-    y_ridge = calculatePosition(spikes_test, mean_firing, by_ridge, avY, curr_bin);
+    meanFiring = modelParameters.pcr(outLabel, idx).f_mean;
+    bx = modelParameters.pcr(outLabel,idx).bx;
+    by = modelParameters.pcr(outLabel,idx).by;
     
-    % Lasso Regression
-    x_lasso = calculatePosition(spikes_test, mean_firing, bx_lasso, avX, curr_bin);
-    y_lasso = calculatePosition(spikes_test, mean_firing, by_lasso, avY, curr_bin);
-    
-    % Choose the best estimate (Weighted Average)
-    lambda_weight = 0.5; % Adjustable: 0 for Lasso only, 1 for Ridge only
-    x = lambda_weight * x_ridge + (1 - lambda_weight) * x_lasso;
-    y = lambda_weight * y_ridge + (1 - lambda_weight) * y_lasso;
-    
-    % x = calculatePosition(spikes_test, mean_firing, bx_ridge, avX, curr_bin);
-    % y = calculatePosition(spikes_test, mean_firing, by_ridge, avY, curr_bin);
-    % predicted = outLabel; %The predicted direction of movement
-
+    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin);
+    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin);
 end
 
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% HELPER FUNCTIONS %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
 
-function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, method)
-% function preprocessed_data = preprocessing(training_data, bin_group, alpha)
+function preprocessed_data = preprocessing(training_data, bin_group, alpha)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing trials in the following manner:
     % 1. Pad each trial’s spikes out to max_time_length
@@ -223,6 +164,7 @@ function data = fill_nan(data, data_type)
     end
 end
 
+
 %% Extract features
 function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -263,7 +205,7 @@ end
 
 
 %% kNN
-function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN_num, confidence_threshold, last_label, pow, alp, method, type)
+function output_lbl = KNN_classifier(test_weight, train_weight, NN_num, pow, alp, method, type)
 
     if strcmp(method, 'hard')
     % Input:
@@ -275,7 +217,6 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
@@ -284,19 +225,9 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             [~, indices] = sort(distances, 'ascend');
             nearestIndices = indices(1:k);
     
-        
             trainLabels = ceil(nearestIndices / trainlen); 
             modeLabel = mode(trainLabels);
             output_lbl(i) = modeLabel;
-
-            % Compute confidence (fraction of nearest neighbors voting for modeLabel)
-            confidence(i) = sum(trainLabels == modeLabel) / k;
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
-            else
-                output_lbl(i) = modeLabel;
-            end
         end
     end
 
@@ -316,7 +247,6 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % For the i-th test sample:
@@ -354,14 +284,80 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             p = angleWeights / sum(angleWeights);
             [~, bestAngle] = max(p);
             output_lbl(i) = bestAngle;
-
-            % Confidence: probability of predicted label
-            confidence(i) = p(bestAngle);
-    
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
-            end
         end
     end
 end
+
+%% kNN
+% function [predictedLabel, confidence] = getKNNs_confidence1(testProjection, trainingProjection)
+%     % Replace kNN with a Nearest-Centroid approach.
+%     % Same inputs/outputs so it can directly replace your existing kNN code.
+%     %
+%     % Inputs:
+%     %   testProjection     - [D x Ntest] matrix: columns are test samples in LDA space.
+%     %   trainingProjection - [D x Ntrain] matrix: columns are training samples in LDA space.
+%     %   ldaDimension       - Not used here, but preserved for signature consistency.
+%     %   neighborhoodFactor - Not used here, but preserved for signature consistency.
+%     %
+%     % Outputs:
+%     %   predictedLabel  - Single integer label (1..8).
+%     %   confidence      - Single scalar in [0,1].
+%     %
+%     % -----------------------------------------------------------------------
+% 
+%     % Number of directions
+%     numDirections = 8;
+% 
+%     % Count how many total training samples there are for each direction:
+%     numTrialsPerDirection = size(trainingProjection, 2) / numDirections;
+% 
+%     % Build direction labels for each training sample [1..8].
+%     directionLabels = [ ...
+%         ones(1,numTrialsPerDirection), ...
+%         2*ones(1,numTrialsPerDirection), ...
+%         3*ones(1,numTrialsPerDirection), ...
+%         4*ones(1,numTrialsPerDirection), ...
+%         5*ones(1,numTrialsPerDirection), ...
+%         6*ones(1,numTrialsPerDirection), ...
+%         7*ones(1,numTrialsPerDirection), ...
+%         8*ones(1,numTrialsPerDirection) ...
+%     ];
+% 
+%     % Compute the centroid for each direction (mean over columns that belong to that direction).
+%     % trainingProjection is D x Ntrain. We'll gather columns belonging to each direction
+%     % and compute mean across them.
+%     centroids = zeros(size(trainingProjection,1), numDirections);  % (D x 8)
+%     for dirIdx = 1:numDirections
+%         colsForThisDir = (directionLabels == dirIdx);
+%         centroids(:, dirIdx) = mean(trainingProjection(:, colsForThisDir), 2);
+%     end
+% 
+%     % testProjection can have multiple columns (multiple test samples).
+%     % We'll classify each column (test sample) to the nearest centroid.
+%     % Then aggregate a single label + confidence in the same scalar form 
+%     % as the existing kNN code (which ends up returning one label/confidence).
+%     %
+%     % If you truly only ever call this with one test sample at a time, 
+%     % this loop effectively does a single pass anyway.
+%     %
+%     % Distances to centroids: (Ntest x 8)
+%     Ntest = size(testProjection, 2);
+%     dists = zeros(Ntest, numDirections);
+%     for iTest = 1:Ntest
+%         diffToCentroids = centroids - testProjection(:, iTest);
+%         dists(iTest,:) = sum(diffToCentroids.^2, 1);  % Euclidean^2 distance
+%     end
+% 
+%     % For each test sample, pick the class (direction) with min distance:
+%     [~, perSampleLabels] = min(dists, [], 2);  % Ntest x 1 integer labels
+% 
+%     % Just like your kNN code does 'mode(mode(...))', we reduce multiple test samples
+%     % to a single final label: 
+%     predictedLabel = mode(perSampleLabels);
+% 
+%     % A simple "confidence" measure: fraction of test samples that voted for predictedLabel.
+%     % This mimics how the kNN version lumps multiple test samples into a single label/confidence.
+%     votesForLabel = sum(perSampleLabels == predictedLabel);
+%     confidence = votesForLabel / Ntest;
+% end
+

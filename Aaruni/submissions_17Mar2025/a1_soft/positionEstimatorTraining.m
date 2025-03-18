@@ -525,6 +525,20 @@ function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, training
     end
 end
 
+function data = fill_nan(data)
+    % Forward fill
+    for i = 2:length(data)
+        if isnan(data(i))
+            data(i) = data(i-1);
+        end
+    end
+    % Backward fill for any remaining NaNs
+    for i = length(data)-1:-1:1
+        if isnan(data(i))
+            data(i) = data(i+1);
+        end
+    end
+end
 
 function [xPos, yPos, formatted_xPos, formatted_yPos,xStd,yStd] = handPos_processing(training_data, bin_group, bins)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -545,10 +559,10 @@ function [xPos, yPos, formatted_xPos, formatted_yPos,xStd,yStd] = handPos_proces
             % Mean Centre
             curr_x = training_data(r,c).handPos(1,:);% - mean(training_data(r,c).handPos(1,:)); %training_data(r,c).handPos(1,301);
             curr_y = training_data(r,c).handPos(2,:);% - mean(training_data(r,c).handPos(2,:)); %training_data(r,c).handPos(2,301);
-
+            
             % Fill missing values in hand position
-            % curr_x = fill_nan(curr_x);
-            % curr_y = fill_nan(curr_y);
+            curr_x = fill_nan(curr_x);
+            curr_y = fill_nan(curr_y);
             
             if size(training_data(r,c).handPos,2) < max_trajectory
                 pad_size = max_trajectory - size(training_data(r,c).handPos,2);
@@ -569,21 +583,6 @@ function [xPos, yPos, formatted_xPos, formatted_yPos,xStd,yStd] = handPos_proces
     % Compute standard deviation across trials (rows) at each time bin (975) for each angle (8)
     xStd = squeeze(std(xPos, 0, 1)); % Result: (975, 8)
     yStd = squeeze(std(yPos, 0, 1));
-end
-
-function data = fill_nan(data)
-    % Forward fill
-    for i = 2:length(data)
-        if isnan(data(i))
-            data(i) = data(i-1);
-        end
-    end
-    % Backward fill for any remaining NaNs
-    for i = length(data)-1:-1:1
-        if isnan(data(i))
-            data(i) = data(i+1);
-        end
-    end
 end
 
 function [regressionCoefficientsX, regressionCoefficientsY, FilteredFiring ] = calcRegressionCoefficients(timeWindowIndex, timeDivision, labels, directionIndex, neuraldata, pca_dimension, Interval, currentXPositions, currentYPositions)

@@ -1,4 +1,4 @@
- function modelParameters = positionEstimatorTraining(training_data)
+function modelParameters = positionEstimatorTraining(training_data)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % POSITION ESTIMATOR TRAINING
     %
@@ -17,29 +17,14 @@
     % PCA and LDA parameters, kNN samples, and RNN weights) are saved in
     % the modelParameters structure.
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % clc;close all;clear;
-    % load('monkeydata_training.mat')
-    % training_data = trial;
-    % rng(2013);
+
 
     %% Parameters
     [training_length, directions] = size(training_data); 
-    % reaching_angles = [1/6, 7/18, 11/18, 15/18, 19/18, 23/18, 31/18, 35/18] .* pi;
     bin_group = 20;
     alpha = 0.35; % arbitrary value decided through multiple trials
-    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = 320; 
 
-    % Determine the minimum spike length across all trials to ensure we don't exceed array bounds.
-    % min_time_length = inf;
-    % for tl = 1:training_length
-    %     for dir = 1:directions
-    %         curr_len = size(training_data(tl, dir).spikes, 2);
-    %         if curr_len < min_time_length
-    %             min_time_length = curr_len;
-    %         end
-    %     end
-    % end
     spike_cells = {training_data.spikes};  % Extract spike fields into a cell array
     min_time_length = min(cellfun(@(sp) size(sp, 2), spike_cells(:))); % Find min time length
     clear spike_cells;
@@ -54,7 +39,7 @@
     modelParameters.stop_idx  = stop_idx;
 
     %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smotthing
-    preprocessed_data = preprocessing(training_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
+    preprocessed_data = preprocessing(training_data, bin_group, alpha);
     orig_neurons = size(preprocessed_data(1,1).rate, 1);
 
     %% Remove data from neurons with low firing rates.
@@ -76,7 +61,7 @@
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
+        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
 
         %% LDA to maximise class separability across different directions
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
@@ -93,36 +78,29 @@
     end
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
-    [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bin_group, num_bins*bin_group);
+    [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
 
     %% PCR
     time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
-    Interval = start_idx:bin_group:stop_idx;
-    lambda_ridge = 0.1; % Regularization parameter for Ridge
-    lambda_lasso = 0.1; % Regularization parameter for Lasso
+    time_interval = start_idx:bin_group:stop_idx;
 
     % modelling hand positions separately for each direction
-    for dir_idx = 1:directions%length(reaching_angles)
+    for dir_idx = 1:directions
     
         % Extract the current direction's hand position data for all trials
-        currentXPositions = formatted_xPos(:,:,dir_idx);
-        currentYPositions = formatted_yPos(:,:,dir_idx);
+        curr_X_pos = formatted_xPos(:,:,dir_idx);
+        curr_Y_pos = formatted_yPos(:,:,dir_idx);
     
         % Loop through each time window to calculate regression coefficients that predict hand positions from neural data
         for win_idx = 1:((stop_idx-start_idx)/bin_group)+1
     
             % Calculate regression coefficients and the windowed firing rates for the current time window and direction
-            [ridge_coeff_X, ridge_coeff_Y, lasso_coeff_X, lasso_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, dir_idx, ...
-                spikes_matrix, pca_threshold, Interval, currentXPositions, currentYPositions, lambda_ridge, lambda_lasso);
+            [reg_coeff_X, reg_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, dir_idx, spikes_matrix, pca_threshold, time_interval, curr_X_pos, curr_Y_pos);
             % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
             
             % Store in model parameters
-            modelParameters.pcr(dir_idx,win_idx).bx_ridge = ridge_coeff_X;
-            modelParameters.pcr(dir_idx,win_idx).by_ridge = ridge_coeff_Y;
-            
-            modelParameters.pcr(dir_idx,win_idx).bx_lasso = lasso_coeff_X;
-            modelParameters.pcr(dir_idx,win_idx).by_lasso = lasso_coeff_Y;
-
+            modelParameters.pcr(dir_idx,win_idx).bx = reg_coeff_X;
+            modelParameters.pcr(dir_idx,win_idx).by = reg_coeff_Y;
             modelParameters.pcr(dir_idx,win_idx).f_mean = mean(win_firing,2);
     
             % And store the mean hand positions across all trials for each time window   
@@ -135,7 +113,7 @@ end
 
 %% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
 
-function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
+function preprocessed_data = preprocessing(training_data, bin_group, alpha)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing trials in the following manner:
     % 1. Pad each trial’s spikes out to max_time_length
@@ -262,7 +240,7 @@ function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, 
                 c_idx = rows * (c - 1) + r; % 100 (1 - 1) + 1 = 1; 1; 1...x13; 101; 
                 r_start = neurons * (k - 1) + 1; % 98 (1 - 1) + 1 = 1; 99; 197;...
                 r_end = neurons * k; % 98; 196;...
-                spikes_matrix(r_start:r_end,c_idx) = preprocessed_data(r,c).rate(:,k);
+                spikes_matrix(r_start:r_end,c_idx) = preprocessed_data(r,c).rate(:,k);  
                 labels(c_idx) = c; 
             end
         end
@@ -292,7 +270,7 @@ end
 
 %% HELPER FUNCTION FOR DIMENSIONALITY REDUCTION
 
-function [coeff, score, nPC] = perform_PCA(data, threshold, method, debug)
+function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Performs principal component analysis on the given data based on a given
 % threshold value.
@@ -306,38 +284,18 @@ function [coeff, score, nPC] = perform_PCA(data, threshold, method, debug)
     % score:
     % nPC:
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    if strcmp(method, 'cov')
-        % nPC = threshold;
-        data_centred = data - mean(data,2);
-        % C = cov(data_centred);
-        C = data_centred' * data_centred;
-        [V, D] = eig(C);
-        [d, idx] = sort(diag(D), 'descend');
-        V = V(:, idx);
-        explained_variance = cumsum(d) / sum(d);
-        nPC = find(explained_variance >= threshold, 1); % Find the number of PCs that explain at least 95% variance
-        score = data_centred * V * diag(1./sqrt(d));
-        score = score(:, 1:nPC);
-        coeff = V(:, 1:nPC);
-    end
-
-    if strcmp(method, 'svd')
-        variance_threshold = threshold;
-        Xc = data - mean(data,2);
-        % Perform SVD on the centered data (using economy size decomposition)
-        [U, S, V] = svd(Xc, 'econ');
-        % Compute variance explained
-        singular_values = diag(S);
-        explained_variance = (singular_values.^2) / sum(singular_values.^2);
-        cum_variance = cumsum(explained_variance);
-        nPC = find(cum_variance >= variance_threshold, 1);
-        % assignin('base', "nPC", nPC);
-        % The principal component directions are given by the columns of V
-        coeff = V(:, 1:nPC);
-        % Reduce data dimensionality: Compute the projection (scores) of the data onto the principal components
-        score = Xc * coeff;
-        score = score(:, 1:nPC);
-    end
+    % nPC = threshold;
+    data_centred = data - mean(data,2);
+    % C = cov(data_centred);
+    C = data_centred' * data_centred;
+    [V, D] = eig(C);
+    [d, idx] = sort(diag(D), 'descend');
+    V = V(:, idx);
+    explained_variance = cumsum(d) / sum(d);
+    nPC = find(explained_variance >= threshold, 1); % Find the number of PCs that explain at least 95% variance
+    score = data_centred * V * diag(1./sqrt(d));
+    score = score(:, 1:nPC);
+    coeff = V(:, 1:nPC);
 
     if strcmp(debug, 'debug')
         figure; plot(score);
@@ -402,7 +360,7 @@ end
 
 %% HELPER FUNCTION FOR PREPROCESSING OF HAND POSITIONS
 
-function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bin_group, bins)
+function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bins)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Hand Position Preprocessing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -446,9 +404,9 @@ end
 
 %% HELPER FUNCTION FOR PCR
 
-function [reg_coeff_X_ridge, reg_coeff_Y_ridge, reg_coeff_X_lasso, reg_coeff_Y_lasso, filtered_firing ] = ...
+function [reg_coeff_X, reg_coeff_Y, filtered_firing ] = ...
 calc_reg_coeff(win_idx, time_div, labels, dir_idx, ...
-spikes_matrix, pca_dimension, time_interval, curr_X_pos, curr_Y_pos, lambda_ridge, lambda_lasso)
+spikes_matrix, pca_dimension, time_interval, curr_X_pos, curr_Y_pos)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Perform principal component regression to calculate regression coefficients
 % that predict hand positions from neural spikes data.
@@ -479,31 +437,15 @@ spikes_matrix, pca_dimension, time_interval, curr_X_pos, curr_Y_pos, lambda_ridg
     centered_win_firing = filtered_firing  - mean(filtered_firing ,1);
 
     % Perform PCA on the centered firing data to reduce dimensionality
-    [~, score, ~] = perform_PCA(centered_win_firing, pca_dimension, 'cov', 'nodebug');
+    [~, score, ~] = perform_PCA(centered_win_firing, pca_dimension, 'nodebug');
     principal_components = score' * centered_win_firing;
 
     % Calculate ridge regression coefficients for X and Y using the regression matrix
-    % reg_mat = pinv(principal_components * principal_components') * principal_components;
-    
-    % Ridge Regression (L2 Regularization)
-    reg_mat_ridge = (principal_components * principal_components' + lambda_ridge * eye(size(principal_components, 1))) \ principal_components;
-    
-    % Lasso Regression (L1 Regularization)
-    % reg_mat_lasso = lasso_regression(principal_components, centered_X, lambda_lasso);
-    reg_mat_lasso_X = lasso_regression(principal_components', centered_X, lambda_lasso);
-    reg_mat_lasso_Y = lasso_regression(principal_components', centered_Y, lambda_lasso);
-    
-    % Compute Regression Coefficients
-    reg_coeff_X_ridge = score * reg_mat_ridge * centered_X;
-    reg_coeff_Y_ridge = score * reg_mat_ridge * centered_Y;
+    reg_mat = pinv(principal_components * principal_components') * principal_components;
 
-    % reg_coeff_X_lasso = score * reg_mat_lasso * centered_X;
-    % reg_coeff_Y_lasso = score * reg_mat_lasso * centered_Y;
-    reg_coeff_X_lasso = score * reg_mat_lasso_X;
-    reg_coeff_Y_lasso = score * reg_mat_lasso_Y;
+    reg_coeff_X = score * reg_mat * centered_X;
+    reg_coeff_Y = score * reg_mat * centered_Y;
 
-    % reg_coeff_X = score * reg_mat * centered_X;
-    % reg_coeff_Y = score * reg_mat * centered_Y;
 end
 
 function filtered_firing = filter_firing_rate(spikes_matrix, time_div, time_interval, labels, dir_idx)
@@ -520,9 +462,7 @@ function filtered_firing = filter_firing_rate(spikes_matrix, time_div, time_inte
 %   labels : column vector of direction labels corresponding to each trial
 %   dir_idx : scalar for direction of movement to filter for.
 % Output:
-%   filtered_firing - The resulting matrix of filtered neural firing rates, where the data has been 
-%                    filtered to include only the time points up to 'interval' and trials that 
-%                    correspond to the specified 'directionIndex'.
+%   filtered_firing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Filter the neural data to include only time points up to 'interval'
@@ -533,29 +473,4 @@ function filtered_firing = filter_firing_rate(spikes_matrix, time_div, time_inte
     % Center the filtered data by subtracting the mean firing rate across the selected trials
     % for the specific direction. 
     filtered_firing  = filtered_firing (:, directionFilter) - mean(filtered_firing(:, directionFilter), 1);
-end
-
-
-function beta = lasso_regression(X, y, lambda)
-    % LASSO regression using coordinate descent
-    [n, p] = size(X);
-    beta = zeros(p, 1);
-    max_iter = 1000;
-    tol = 1e-6;
-
-    for iter = 1:max_iter
-        beta_old = beta;
-        for j = 1:p
-            r = y - X * beta + X(:, j) * beta(j);
-            beta(j) = soft_threshold(X(:, j)' * r / n, lambda);
-        end
-        if norm(beta - beta_old, 2) < tol
-            break;
-        end
-    end
-end
-
-function z = soft_threshold(x, lambda)
-    % Soft thresholding operator for LASSO
-    z = sign(x) .* max(abs(x) - lambda, 0);
 end

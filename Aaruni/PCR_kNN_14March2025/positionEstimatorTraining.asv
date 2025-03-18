@@ -141,7 +141,8 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
     % 1. Pad each trial’s spikes out to max_time_length
     % 2. Bin data to get the firing rate
     % 3. Apply square root transformation
-    % 4. Smooth using a recursive filter, exponential moving average (EMA)
+    % 4. Smooth using a recursive filter, exponential moving average (EMA),
+    % or gaussian filter
 % Inputs:
     % training_data: input training data containing the spikes and hand positions
     % bin_group: binning resolution in milliseconds
@@ -165,7 +166,6 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
     for tl = 1:rows
         for dir = 1:cols
             curr_spikes = training_data(tl, dir).spikes; 
-            curr_spikes = fill_nan(curr_spikes, 'spikes');
             [num, T] = size(curr_spikes);
             if T < max_time_length
                 padNeeded = max_time_length - T;
@@ -180,6 +180,8 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
             train = training_data(r,c);
             [neurons, timepoints] = size(train.spikes);
             num_bins = floor(timepoints / bin_group); % 28
+            % t_new = 1:bin_group:timepoints + 1;
+            % num_bins = numel(t_new) - 1;
 
             binned_spikes = zeros(neurons, num_bins);
 
@@ -196,10 +198,38 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
             % Apply sqrt transformation 
             sqrt_spikes = sqrt(binned_spikes);
 
+            % Apply gaussian smoothing
+            if strcmp(filter_type, 'Gaussian')
+                gKernel = gaussian_filter(bin_group, sigma);
+                % Convolve each neuron's spike train with the Gaussian kernel.
+                gaussian_spikes = zeros(size(sqrt_spikes));
+                for n = 1:neurons
+                    gaussian_spikes(n,:) = conv(sqrt_spikes(n,:), gKernel, 'same')/(bin_group/1000);
+                end
+                preprocessed_data(r,c).rate = gaussian_spikes; % spikes per millisecond
+            end
+
             % Apply EMA smoothing
-            ema_spikes = ema_filter(sqrt_spikes, alpha, neurons);
-            preprocessed_data(r,c).rate = ema_spikes / (bin_group/1000); % spikes per second
+            if strcmp(filter_type, 'EMA')
+                ema_spikes = ema_filter(sqrt_spikes, alpha, neurons);
+                preprocessed_data(r,c).rate = ema_spikes / (bin_group/1000); % spikes per second
+            end            
         end
+    end
+    
+    if strcmp(debug, 'debug')
+        plot_r = 1; plot_c = 1; plot_n =1;
+        figure; sgtitle('After preprocessing');
+        subplot(1,2,1); hold on;
+        % plot(training_data(plot_r,plot_c).spikes(plot_n,:), DisplayName='Original', LineWidth=1.5); 
+        plot(preprocessed_data(plot_r,plot_c).rate(plot_n,:), DisplayName='Preprocessed', LineWidth=1.5);
+        xlabel('Bins'); ylabel('Firing Rate (spikes/s)');
+        title('Spikes'); legend show; hold off;
+    
+        subplot(1,2,2); hold on;
+        plot(preprocessed_data(plot_r,plot_c).handPos(1,:), preprocessed_data(plot_r,plot_c).handPos(2,:), DisplayName='Original', LineWidth=1.5); 
+        xlabel('x pos'); ylabel('y pos');
+        title('Hand Positions'); legend show; hold off;
     end
 end
 
@@ -215,26 +245,15 @@ function ema_spikes = ema_filter(sqrt_spikes, alpha, num_neurons)
 end
 
 
-function data = fill_nan(data, data_type)
+function gKernel = gaussian_filter(bin_group, sigma)
+    % Create a 1D Gaussian kernel centered at zero.
+    gaussian_window = 10*(sigma/bin_group);
+    e_std = sigma/bin_group;
+    alpha = (gaussian_window-1)/(2*e_std);
 
-    if strcmp(data_type, 'spikes')
-        data(isnan(data)) = 0;
-    end
-    
-    if strcmp(data_type, 'handpos')
-        % Forward fill
-        for r = 2:length(data)
-            if isnan(data(r))
-                data(r) = data(r-1);
-            end
-        end
-        % Backward fill for any remaining NaNs
-        for r = length(data)-1:-1:1
-            if isnan(data(r))
-                data(r) = data(r+1);
-            end
-        end
-    end
+    time_window = -(gaussian_window-1)/2:(gaussian_window-1)/2;
+    gKernel = exp((-1/2) * (alpha * time_window/((gaussian_window-1)/2)).^2)';
+    gKernel = gKernel / sum(gKernel);
 end
 
 %% HELPER FUNCTIONS FOR FEATURE EXTRACTION
@@ -402,6 +421,21 @@ end
 
 %% HELPER FUNCTION FOR PREPROCESSING OF HAND POSITIONS
 
+function data = fill_nan(data)
+    % Forward fill
+    for i = 2:length(data)
+        if isnan(data(i))
+            data(i) = data(i-1);
+        end
+    end
+    % Backward fill for any remaining NaNs
+    for i = length(data)-1:-1:1
+        if isnan(data(i))
+            data(i) = data(i+1);
+        end
+    end
+end
+
 function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bin_group, bins)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Hand Position Preprocessing
@@ -424,8 +458,8 @@ function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(train
             curr_y = training_data(r,c).handPos(2,:);% - mean(training_data(r,c).handPos(2,:)); %training_data(r,c).handPos(2,301);
             
             % Fill missing values in hand position
-            curr_x = fill_nan(curr_x, 'handpos');
-            curr_y = fill_nan(curr_y, 'handpos');
+            curr_x = fill_nan(curr_x);
+            curr_y = fill_nan(curr_y);
 
             if size(training_data(r,c).handPos,2) < max_trajectory
                 pad_size = max_trajectory - size(training_data(r,c).handPos,2);
@@ -489,18 +523,14 @@ spikes_matrix, pca_dimension, time_interval, curr_X_pos, curr_Y_pos, lambda_ridg
     reg_mat_ridge = (principal_components * principal_components' + lambda_ridge * eye(size(principal_components, 1))) \ principal_components;
     
     % Lasso Regression (L1 Regularization)
-    % reg_mat_lasso = lasso_regression(principal_components, centered_X, lambda_lasso);
-    reg_mat_lasso_X = lasso_regression(principal_components', centered_X, lambda_lasso);
-    reg_mat_lasso_Y = lasso_regression(principal_components', centered_Y, lambda_lasso);
+    reg_mat_lasso = lasso_regression(principal_components, centered_X, lambda_lasso);
     
     % Compute Regression Coefficients
     reg_coeff_X_ridge = score * reg_mat_ridge * centered_X;
     reg_coeff_Y_ridge = score * reg_mat_ridge * centered_Y;
 
-    % reg_coeff_X_lasso = score * reg_mat_lasso * centered_X;
-    % reg_coeff_Y_lasso = score * reg_mat_lasso * centered_Y;
-    reg_coeff_X_lasso = score * reg_mat_lasso_X;
-    reg_coeff_Y_lasso = score * reg_mat_lasso_Y;
+    reg_coeff_X_lasso = score * reg_mat_lasso * centered_X;
+    reg_coeff_Y_lasso = score * reg_mat_lasso * centered_Y;
 
     % reg_coeff_X = score * reg_mat * centered_X;
     % reg_coeff_Y = score * reg_mat * centered_Y;
