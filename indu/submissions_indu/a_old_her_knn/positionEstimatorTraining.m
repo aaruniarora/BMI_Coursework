@@ -60,6 +60,9 @@ function modelParameters = positionEstimatorTraining(training_data)
     neurons = orig_neurons - length(removed_neurons);
     modelParameters.removeneurons = removed_neurons;
     clear spikes_mat
+
+    pca_threshold = 0.44;
+    lda_dim = 6;
  
     for curr_bin = 1: length(num_bins)
         %% Extract features/restructure data for further analysis
@@ -69,11 +72,11 @@ function modelParameters = positionEstimatorTraining(training_data)
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-        pca_threshold = 0.45; % =40 for cov and =0.95 for svd
-        [coeff, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
+  % =40 for cov and =0.95 for svd
+        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
 
         %% LDA to maximise class separability across different directions
-        lda_dim = 6;
+
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
 
         %% kNN training: store samples in LDA space with corresponding hand positions
@@ -85,10 +88,6 @@ function modelParameters = positionEstimatorTraining(training_data)
     
         modelParameters.classify(curr_bin).mean_firing = mean(spikes_matrix, 2);
         modelParameters.classify(curr_bin).labels_kNN = labels(:)';
-
-        % disp(['At bin=',num2str(curr_bin), ...
-        %       ', spikes_matrix is ', num2str(size(spikes_matrix,1)), ' x ', num2str(size(spikes_matrix,2))]);
-        % disp(['Mean firing is ', num2str(size(mean(spikes_matrix, 2))), ' x ', num2str(size(mean(spikes_matrix, 2)))]);
     end
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
@@ -129,31 +128,6 @@ function modelParameters = positionEstimatorTraining(training_data)
             
         end
     end
-    
-    %% RNN Regression Coefficients
-    % hiddenSize   = 20;
-    % learningRate = 0.001;
-    % nEpochs      = 100;
-    % 
-    % for dir = 1:length(reaching_angles)
-    %     curr_x = preprocessed_data(:,dir).handPos(1,:); % formatted_xPos(:,:,dir);
-    %     curr_y = preprocessed_data(:,dir).handPos(2,:); % formatted_yPos(:,:,dir);
-    % 
-    %     x = spikes_matrix(:, 100*(dir-1)+1 : 100*dir);
-    %     x = reshape(x, [98, size(curr_y,2), 100]);
-    %     y = [curr_x; curr_y];
-    % 
-    %     % Perform RNN
-    %     %   X: (D x T) input matrix (e.g. T=28 bins, D=some # features or #neurons)
-    %     %   Y: (2 x T) desired output (X position, Y position) for each time bin
-    %     % and you want 20 hidden units, a 0.001 learning rate, trained for 100 epochs.        
-    %     rnnModel = trainElmanRNN(x, y, hiddenSize, learningRate, nEpochs);
-    % 
-    %     % rnnModel now has all learned weights and biases.
-    %     % You can store rnnModel in your modelParameters struct:
-    %     modelParameters.rnn(dir) = rnnModel;
-    % end
-    
 end
 
 %%
@@ -438,6 +412,9 @@ function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(train
             % Mean Centre
             curr_x = training_data(r,c).handPos(1,:);% - mean(training_data(r,c).handPos(1,:)); %training_data(r,c).handPos(1,301);
             curr_y = training_data(r,c).handPos(2,:);% - mean(training_data(r,c).handPos(2,:)); %training_data(r,c).handPos(2,301);
+
+            curr_x = fill_nan(curr_x);
+            curr_y = fill_nan(curr_y);
             
             if size(training_data(r,c).handPos,2) < max_trajectory
                 pad_size = max_trajectory - size(training_data(r,c).handPos,2);
@@ -535,182 +512,19 @@ function FilteredFiring = filterFiringData(neuraldata, timeDivision, interval, l
     FilteredFiring  = FilteredFiring (:, directionFilter) - mean(FilteredFiring(:, directionFilter), 1);
 end
 
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-function rnnModel = trainElmanRNN(X, Y, hiddenSize, learningRate, nEpochs)
-% trainElmanRNN - Train a simple Elman RNN (one hidden layer) via BPTT.
-%
-%   rnnModel = trainElmanRNN(X, Y, hiddenSize, learningRate, nEpochs)
-%
-% Inputs:
-%   X            [DxT] matrix of inputs,  D = dimension of input, T = # of timesteps
-%   Y            [OxT] matrix of targets, O = dimension of output, T = # of timesteps
-%   hiddenSize   scalar, # of hidden units H
-%   learningRate scalar, step size for gradient descent
-%   nEpochs      scalar, number of epochs (full passes) over the sequence
-%
-% Output:
-%   rnnModel     struct containing learned weights/biases:
-%                W_xh, W_hh, W_ho, b_h, b_o
-%                as well as final training loss trajectory
-%
-% Reference: 
-%   - Elman, J. L. (1990). "Finding structure in time." Cognitive Science, 14(2), 179–211.
-%   - Goodfellow, Bengio, Courville (2016). "Deep Learning." MIT Press.
-
-  % ------------------------
-  % 1. Dimensions & Init
-  % ------------------------
-  [inputSize, T]  = size(X); 
-  outputSize       = size(Y,1);
-  H               = hiddenSize;  % # hidden units
-
-  % Random initialization (small random values)
-  rng('default');
-  W_xh = 0.01*randn(H, inputSize);  % input-to-hidden
-  W_hh = 0.01*randn(H, H);          % hidden-to-hidden
-  W_ho = 0.01*randn(outputSize, H); % hidden-to-output
-
-  b_h  = zeros(H,1);
-  b_o  = zeros(outputSize,1);
-
-  % Store for debugging
-  lossHistory = zeros(nEpochs,1);
-
-  % ------------------------
-  % 2. Training Loop
-  % ------------------------
-  for epoch = 1:nEpochs
-
-      % Initialize total gradients to zero
-      dW_xh = zeros(size(W_xh));
-      dW_hh = zeros(size(W_hh));
-      dW_ho = zeros(size(W_ho));
-      db_h  = zeros(size(b_h));
-      db_o  = zeros(size(b_o));
-
-      % We will store hidden states for backprop
-      h = zeros(H, T);   % hidden states for each t
-      hprev = zeros(H,1);
-
-      % ===== Forward pass: compute h_t and yhat_t for t=1..T =====
-      yhat = zeros(outputSize, T);
-      for t = 1:T
-          x_t     = X(:,t);
-          % hidden update
-          h(:,t)  = tanh( W_xh*x_t + W_hh*hprev + b_h );
-          % output
-          yhat(:,t) = W_ho * h(:,t) + b_o;
-          % update hprev for next time
-          hprev = h(:,t);
-      end
-
-      % Compute cost (MSE)
-      cost = 0.5 * mean(sum((Y - yhat).^2,1)); 
-      lossHistory(epoch) = cost;
-
-      % ===== Backward pass: BPTT to accumulate gradients =====
-      % We'll propagate gradients backward in time from t=T..1
-      dh_next = zeros(H,1); % gradient wrt hidden state at next time
-      for t = T:-1:1
-          % dL/dyhat
-          dy = (yhat(:,t) - Y(:,t)); % O x 1
-          % partial wrt W_ho, b_o
-          dW_ho = dW_ho + dy * (h(:,t))';
-          db_o  = db_o  + dy;
-
-          % gradient wrt h(t)
-          dh = (W_ho' * dy) + dh_next;  % add the gradient coming from next time step
-          
-          % derivative of tanh: dtanh(z) = 1 - tanh^2(z)
-          z_t = h(:,t);  % same as tanh(...) above
-          dtanh_ = (1 - z_t.^2) .* dh;  % element-wise
-
-          % partial wrt b_h
-          db_h  = db_h  + dtanh_;
-
-          % partial wrt W_xh, W_hh
-          x_t = X(:,t);
-          dW_xh = dW_xh + dtanh_ * x_t';
-          
-          % We need h(t-1). If t>1, h(t-1) is h(:,t-1), else 0
-          if t>1
-              h_tm1 = h(:,t-1);
-          else
-              h_tm1 = zeros(H,1);
-          end
-          dW_hh = dW_hh + dtanh_ * h_tm1';
-
-          % gradient wrt h(t-1) to pass backward
-          dh_next = W_hh' * dtanh_;
-      end
-
-      % ====================
-      % 3. Gradient Update
-      % ====================
-      % (Simple gradient descent)
-      W_xh = W_xh - learningRate * dW_xh / T;
-      W_hh = W_hh - learningRate * dW_hh / T;
-      W_ho = W_ho - learningRate * dW_ho / T;
-      b_h  = b_h  - learningRate * db_h  / T;
-      b_o  = b_o  - learningRate * db_o  / T;
-      
-      % (Optional) Display or store the cost for monitoring
-      if mod(epoch, 10) == 0
-          fprintf('Epoch %d/%d, MSE loss = %.4f\n', epoch, nEpochs, cost);
-      end
-  end
-
-  % ------------------------
-  % 4. Store Results
-  % ------------------------
-  rnnModel.W_xh = W_xh;
-  rnnModel.W_hh = W_hh;
-  rnnModel.W_ho = W_ho;
-  rnnModel.b_h  = b_h;
-  rnnModel.b_o  = b_o;
-  rnnModel.loss = lossHistory;
+function data = fill_nan(data)
+    % Forward fill
+    for i = 2:length(data)
+        if isnan(data(i))
+            data(i) = data(i-1);
+        end
+    end
+    % Backward fill for any remaining NaNs
+    for i = length(data)-1:-1:1
+        if isnan(data(i))
+            data(i) = data(i+1);
+        end
+    end
 end
+ 
 
-
-
-% function weights = perform_RNN(binnedTrials, mu, coeff, Wlda, binSize)
-%     % Train a simple linear RNN model using least squares.
-%     % For each trial, for time steps t = 2:end, create input:
-%     %   [LDA_features (current bin), previous hand position, 1]
-%     % and target:
-%     %   delta = current hand position - previous hand position.
-%     nLDA = size(Wlda,2);
-%     X_total = [];
-%     Y_total = [];
-% 
-%     [numRows, numCols] = size(binnedTrials);
-%     for i = 1:numRows
-%         for j = 1:numCols
-%             trial = binnedTrials(i,j);
-%             numBins = size(trial.spikes,2);
-%             if numBins < 2, continue; end
-%             % Compute LDA features for each bin using PCA and LDA parameters
-%             features_lda = zeros(numBins, nLDA);
-%             for b = 1:numBins
-%                 spike_bin = trial.spikes(:, b)'; % 1 x numNeurons
-%                 spike_bin_centered = spike_bin - mu;
-%                 pca_feat = spike_bin_centered * coeff;  % 1 x nPC
-%                 features_lda(b,:) = pca_feat * Wlda;      % 1 x nLDA
-%             end
-%             % For time steps t=2...numBins, get input and target delta
-%             for b = 2:numBins
-%                 prevHand = trial.handPos(1:2, b-1)';  % previous (x,y)
-%                 currentHand = trial.handPos(1:2, b)';   % current (x,y)
-%                 delta = currentHand - prevHand;          % change in hand pos
-%                 current_feat = features_lda(b, :);        % current LDA features
-%                 X_sample = [current_feat, prevHand, 1];     % add bias term
-%                 X_total = [X_total; X_sample];
-%                 Y_total = [Y_total; delta];
-%             end
-%         end
-%     end
-%     % Solve for weights: (nLDA + 3) x 2 matrix
-%     weights = pinv(X_total) * Y_total;
-% end

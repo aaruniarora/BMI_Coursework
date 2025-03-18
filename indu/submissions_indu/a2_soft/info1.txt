@@ -5,4 +5,4 @@ classification
 time 
 k 20
 pow 1
-len b mode 8
+len b mode 6

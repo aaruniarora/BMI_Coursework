@@ -1,4 +1,4 @@
-function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
+    function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % POSITION ESTIMATOR (DECODER)
     %

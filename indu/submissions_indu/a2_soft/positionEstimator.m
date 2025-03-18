@@ -1,27 +1,9 @@
 function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % POSITION ESTIMATOR (DECODER)
-    %
-    % This function decodes the (x,y) hand position from test data using the
-    % modelParameters produced during training. It performs the same
-    % preprocessing steps (trimming, padding, Gaussian filtering, and binning)
-    % and then uses PCA, LDA, kNN, and a simple RNN update to predict the hand position.
-    %
-    % newModelParameters is returned unmodified (the RNN here is stateless).
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    % % Initial Parameters
-    % clc;close all;clear;
-    % load('monkeydata_training.mat')
-    % test_data = trial;
-    % rng(2013);
 
     %% Parameters
-    % [test_length, directions] = size(test_data); 
 
     bin_group = 20;
     alpha = 0.3; % ema decay
-    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
     % dir_stop = 460;
@@ -29,7 +11,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     % Soft kNN parameters
     k = 20; % 8 for hard kNN and 20 for soft
     pow = 1; 
-    alp = 1e-6;
+    % alp = 1e-6;
     % confidence_threshold = 0.5;
 
     if ~isfield(modelParameters, 'actualLabel')
@@ -38,7 +20,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
 
    %% Preprocess the trial data
-   preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
+   preprocessed_test = preprocessing(test_data, bin_group,alpha);
    neurons = size(preprocessed_test(1,1).rate, 1);
 
    %% Use indexing based on data given
@@ -62,7 +44,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
       % Play around with hard and soft kNN. Soft kNN also has dist and exp types!
       % [outLabel, confidence] = getKNNs_confidence3(test_weight, train_weight,'euclidean');
       % [outLabel, confidence] = getKNNs_confidence1(test_weight, train_weight);
-      [outLabel] = KNN_classifier(test_weight, train_weight, k, pow, alp, 'soft', 'dist');
+      [outLabel] = KNN_classifier(test_weight, train_weight, k, pow, 'soft', 'dist');
   
     end
    
@@ -106,7 +88,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
         end
     end
 
-    len_b_mode = 7;
+    len_b_mode = 6;
     % Update the actual label in model parameters
     if ~isempty(modelParameters.actualLabel)
         
@@ -135,132 +117,56 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     % stdev = modelParameters.pcr(outLabel, idx).fstd;
     bx = modelParameters.pcr(outLabel,idx).bx;
     by = modelParameters.pcr(outLabel,idx).by;
-    % r = 2 * randi([0, 1]) - 1;
-    % xStd = modelParameters.stdx * randi([0, 1])*r;
-    % yStd = modelParameters.stdy * randi([0, 1])*r;
-    % 
-    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin);% xStd(outLabel);
-    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin);%+ yStd(outLabel);
+    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin);
+    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin);
     
-    %predicted = outLabel; %The predicted direction of movement
 
 end
 
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% HELPER FUNCTIONS %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function [predictedLabel, confidence] = getKNNs_confidence3(testProjection, trainingProjection, distanceMetric)
-    % Nearest Centroid Classifier with weighted voting based on distance
-    % Supports multiple distance metrics.
-    %
-    % Inputs:
-    %   testProjection     - [D x Ntest] matrix: columns are test samples in LDA space.
-    %   trainingProjection - [D x Ntrain] matrix: columns are training samples in LDA space.
-    %   distanceMetric     - String that specifies the distance metric ('euclidean', 'manhattan', 'cosine', 'minkowski').
-    %
-    % Outputs:
-    %   predictedLabel  - Single integer label (1..8).
-    %   confidence      - Single scalar in [0,1].
-    
-    % Number of directions (classes)
-    numDirections = 8;
-    
-    % Count the number of training samples per direction:
-    numTrialsPerDirection = size(trainingProjection, 2) / numDirections;
-    
-    % Build direction labels for each training sample [1..8]
-    directionLabels = repelem(1:numDirections, numTrialsPerDirection);
-    
-    % Compute the centroid for each direction (mean over columns belonging to that direction)
-    centroids = zeros(size(trainingProjection,1), numDirections);  % (D x 8)
-    for dirIdx = 1:numDirections
-        colsForThisDir = directionLabels == dirIdx;
-        centroids(:, dirIdx) = mean(trainingProjection(:, colsForThisDir), 2);
-    end
-
-    % Compute distances based on the selected distance metric
-    Ntest = size(testProjection, 2);
-    dists = zeros(Ntest, numDirections);
-    
-    for iTest = 1:Ntest
-        for dirIdx = 1:numDirections
-            diff = testProjection(:, iTest) - centroids(:, dirIdx);  % Difference between test sample and centroid
-            
-            switch distanceMetric
-                case 'euclidean'
-                    % Euclidean distance
-                    dists(iTest, dirIdx) = sum(diff.^2);
-                case 'manhattan'
-                    % Manhattan distance (L1)
-                    dists(iTest, dirIdx) = sum(abs(diff));
-                case 'cosine'
-                    % Cosine similarity
-                    dists(iTest, dirIdx) = 1 - (dot(testProjection(:, iTest), centroids(:, dirIdx)) / (norm(testProjection(:, iTest)) * norm(centroids(:, dirIdx))));
-                case 'minkowski'
-                    % Minkowski distance (with p = 3)
-                    p = 3;  % You can adjust 'p' for different behaviors
-                    dists(iTest, dirIdx) = sum(abs(diff).^p)^(1/p);
-                otherwise
-                    error('Unsupported distance metric. Choose from "euclidean", "manhattan", "cosine", or "minkowski".');
-            end
-        end
-    end
-    
-    % For each test sample, pick the class (direction) with min distance:
-    [~, perSampleLabels] = min(dists, [], 2);  % Ntest x 1 integer labels (for each test sample)
-
-    % Weighted Voting based on inverse distance (weights based on distance)
-    epsilon = 1e-6;
-    inverseDists = 1 ./ (dists + epsilon);  % Inverse of distances (avoid div by zero)
-    
-    % Sum inverse distances for each label (direction)
-    weightedVotes = zeros(Ntest, numDirections);
-    for i = 1:numDirections
-        weightedVotes(:, i) = sum(inverseDists(:, perSampleLabels == i), 2);
-    end
-    
-    % Predicted label: the label with the highest weighted vote
-    [~, predictedLabel] = max(weightedVotes, [], 2);
-    
-    % Confidence: normalized weighted vote for the predicted label
-    maxVotes = weightedVotes(:, predictedLabel);
-    confidence = maxVotes / sum(weightedVotes, 2);  % Normalize to get confidence in range [0, 1]
-    
-end
-
-
-function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, method)
+%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
+function preprocessed_data = preprocessing(training_data, bin_group, alpha)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing trials in the following manner:
-    % 1. Bin data to get the firing rate
-    % 2. Apply square root transformation
-    % 3. Smooth using a recursive filter, exponential moving average (EMA),
-    % or gaussian filter
+    % 1. Pad each trial's spikes out to max_time_length
+    % 2. Bin data to get the firing rate
+    % 3. Apply square root transformation
+    % 4. Smooth using a recursive filter, exponential moving average (EMA)
 % Inputs:
     % training_data: input training data containing the spikes and hand positions
     % bin_group: binning resolution in milliseconds
+    % filter_type: choose between 'EMA' and 'Gaussian' filtering
     % alpha: Smoothing factor (0 < alpha <= 1). A higher alpha gives more weight to the current data point.
+    % sigma: gaussian filtering window
+    % debug: plots if debug=='debug'
 % Output:
     % preprocessed_data: preprocessed dataset with spikes and hand positions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
     % Initialise
-    [rows, cols] = size(training_data); 
+    [rows, cols] = size(training_data);
     preprocessed_data = struct;
-   
+    spike_cells = {training_data.spikes};
+    max_time_length = max(cellfun(@(sc) size(sc, 2), spike_cells));
+    clear spike_cells;
+    % Pad each trial's spikes out to max_time_length
+    for tl = 1:rows
+        for dir = 1:cols
+            curr_spikes = training_data(tl, dir).spikes;
+            curr_spikes = fill_nan(curr_spikes, 'spikes');
+            [num, T] = size(curr_spikes);
+            if T < max_time_length
+                padNeeded = max_time_length - T;
+                training_data(tl, dir).spikes = [curr_spikes, zeros(num, padNeeded)]; % repmat(curr_spikes(:, end), 1, padNeeded)
+            end
+        end
+    end
     % Bin the spikes by summing counts over non-overlapping windows to get the firing rate
     for c = 1:cols
         for r = 1:rows
             train = training_data(r,c);
             [neurons, timepoints] = size(train.spikes);
             num_bins = floor(timepoints / bin_group); % 28
-            % t_new = 1:bin_group:timepoints + 1;
-            % num_bins = numel(t_new) - 1;
-
             binned_spikes = zeros(neurons, num_bins);
-
             for b = 1:num_bins
                 start_time = (b-1)*bin_group + 1; % 1, 21, 41, ..., 541
                 end_time = b*bin_group; % 20, 40, 60, ..., 560
@@ -271,43 +177,12 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
                 end
             end
             
-            % Apply sqrt transformation 
+            % Apply sqrt transformation
             sqrt_spikes = sqrt(binned_spikes);
-
-            % Apply gaussian smoothing
-            if strcmp(filter_type, 'Gaussian')
-                gKernel = gaussian_filter(bin_group, sigma);
-                % Convolve each neuron's spike train with the Gaussian kernel.
-                gaussian_spikes = zeros(size(sqrt_spikes));
-                for n = 1:neurons
-                    gaussian_spikes(n,:) = conv(sqrt_spikes(n,:), gKernel, 'same')/(bin_group/1000);
-                end
-                preprocessed_data(r,c).rate = gaussian_spikes; % spikes per millisecond
-            end
-
             % Apply EMA smoothing
-            if strcmp(filter_type, 'EMA')
-                ema_spikes = ema_filter(sqrt_spikes, alpha, neurons);
-                preprocessed_data(r,c).rate = ema_spikes / (bin_group/1000); % spikes per second
-            end
-            
-            % preprocessed_data(r,c).handPos = training_data(r,c).handPos;
+            ema_spikes = ema_filter(sqrt_spikes, alpha, neurons);
+            preprocessed_data(r,c).rate = ema_spikes / (bin_group/1000); % spikes per second
         end
-    end
-    
-    if strcmp(method, 'debug')
-        plot_r = 1; plot_c = 1; plot_n =1;
-        figure; sgtitle('After preprocessing');
-        subplot(1,2,1); hold on;
-        % plot(training_data(plot_r,plot_c).spikes(plot_n,:), DisplayName='Original', LineWidth=1.5); 
-        plot(preprocessed_data(plot_r,plot_c).rate(plot_n,:), DisplayName='Preprocessed', LineWidth=1.5);
-        xlabel('Bins'); ylabel('Firing Rate (spikes/s)');
-        title('Spikes'); legend show; hold off;
-    
-        subplot(1,2,2); hold on;
-        plot(preprocessed_data(plot_r,plot_c).handPos(1,:), preprocessed_data(plot_r,plot_c).handPos(2,:), DisplayName='Original', LineWidth=1.5); 
-        xlabel('x pos'); ylabel('y pos');
-        title('Hand Positions'); legend show; hold off;
     end
 end
 
@@ -321,17 +196,17 @@ function ema_spikes = ema_filter(sqrt_spikes, alpha, num_neurons)
     end
 end
 
-
-function gKernel = gaussian_filter(bin_group, sigma)
-    % Create a 1D Gaussian kernel centered at zero.
-    gaussian_window = 10*(sigma/bin_group);
-    e_std = sigma/bin_group;
-    alpha = (gaussian_window-1)/(2*e_std);
-
-    time_window = -(gaussian_window-1)/2:(gaussian_window-1)/2;
-    gKernel = exp((-1/2) * (alpha * time_window/((gaussian_window-1)/2)).^2)';
-    gKernel = gKernel / sum(gKernel);
-end
+% 
+% function gKernel = gaussian_filter(bin_group, sigma)
+%     % Create a 1D Gaussian kernel centered at zero.
+%     gaussian_window = 10*(sigma/bin_group);
+%     e_std = sigma/bin_group;
+%     alpha = (gaussian_window-1)/(2*e_std);
+% 
+%     time_window = -(gaussian_window-1)/2:(gaussian_window-1)/2;
+%     gKernel = exp((-1/2) * (alpha * time_window/((gaussian_window-1)/2)).^2)';
+%     gKernel = gKernel / sum(gKernel);
+% end
 
 
 %% Extract features
@@ -378,166 +253,43 @@ function pos = calculatePosition(neuraldata, meanFiring, b, av, curr_bin)
 end
 
 
-%% nearest neighbour
-function [predictedLabel, confidence] = getKNNs_confidence1(testProjection, trainingProjection)
-    % Replace kNN with a Nearest-Centroid approach.
-    % Same inputs/outputs so it can directly replace your existing kNN code.
-    %
-    % Inputs:
-    %   testProjection     - [D x Ntest] matrix: columns are test samples in LDA space.
-    %   trainingProjection - [D x Ntrain] matrix: columns are training samples in LDA space.
-
-    %
-    % Outputs:
-    %   predictedLabel  - Single integer label (1..8).
-    %   confidence      - Single scalar in [0,1].
-    %
-    % -----------------------------------------------------------------------
-
-    % Number of directions
-    numDirections = 8;
-    
-    % Count how many total training samples there are for each direction:
-    numTrialsPerDirection = size(trainingProjection, 2) / numDirections;
-    
-    % Build direction labels for each training sample [1..8].
-    directionLabels = [ ...
-        ones(1,numTrialsPerDirection), ...
-        2*ones(1,numTrialsPerDirection), ...
-        3*ones(1,numTrialsPerDirection), ...
-        4*ones(1,numTrialsPerDirection), ...
-        5*ones(1,numTrialsPerDirection), ...
-        6*ones(1,numTrialsPerDirection), ...
-        7*ones(1,numTrialsPerDirection), ...
-        8*ones(1,numTrialsPerDirection) ...
-    ];
-    
-    % Compute the centroid for each direction (mean over columns that belong to that direction).
-    % trainingProjection is D x Ntrain. We'll gather columns belonging to each direction
-    % and compute mean across them.
-    centroids = zeros(size(trainingProjection,1), numDirections);  % (D x 8)
-    for dirIdx = 1:numDirections
-        colsForThisDir = (directionLabels == dirIdx);
-        centroids(:, dirIdx) = mean(trainingProjection(:, colsForThisDir), 2);
-    end
-
-    % testProjection can have multiple columns (multiple test samples).
-    % We'll classify each column (test sample) to the nearest centroid.
-    % Then aggregate a single label + confidence in the same scalar form 
-    % as the existing kNN code (which ends up returning one label/confidence).
-    %
-    % If you truly only ever call this with one test sample at a time, 
-    % this loop effectively does a single pass anyway.
-    %
-    % Distances to centroids: (Ntest x 8)
-    Ntest = size(testProjection, 2);
-    dists = zeros(Ntest, numDirections);
-    for iTest = 1:Ntest
-        diffToCentroids = centroids - testProjection(:, iTest);
-        dists(iTest,:) = sum(diffToCentroids.^2, 1);  % Euclidean^2 distance
-    end
-    
-    % For each test sample, pick the class (direction) with min distance:
-    [~, perSampleLabels] = min(dists, [], 2);  % Ntest x 1 integer labels
-    
-    % Just like your kNN code does 'mode(mode(...))', we reduce multiple test samples
-    % to a single final label: 
-    predictedLabel = mode(perSampleLabels);
-    
-    % A simple "confidence" measure: fraction of test samples that voted for predictedLabel.
-    % This mimics how the kNN version lumps multiple test samples into a single label/confidence.
-    votesForLabel = sum(perSampleLabels == predictedLabel);
-    confidence = votesForLabel / Ntest;
-end
-
-function [predictedLabel, confidence] = getKNNs_confidence2(testProjection, trainingProjection)
-    % Replace kNN with a Nearest-Centroid approach without using toolboxes.
-    
-    numDirections = 8;
-    numTrialsPerDirection = size(trainingProjection, 2) / numDirections;
-    
-    % Direction labels for training samples
-    directionLabels = [ ...
-        ones(1, numTrialsPerDirection), ...
-        2*ones(1, numTrialsPerDirection), ...
-        3*ones(1, numTrialsPerDirection), ...
-        4*ones(1, numTrialsPerDirection), ...
-        5*ones(1, numTrialsPerDirection), ...
-        6*ones(1, numTrialsPerDirection), ...
-        7*ones(1, numTrialsPerDirection), ...
-        8*ones(1, numTrialsPerDirection) ...
-    ];
-    
-    % Compute centroids for each direction (mean over columns)
-    centroids = zeros(size(trainingProjection, 1), numDirections);
-    for dirIdx = 1:numDirections
-        colsForThisDir = (directionLabels == dirIdx);
-        samplesForThisDir = trainingProjection(:, colsForThisDir);
-        
-        % Compute mean (centroid) of samples for this direction
-        centroids(:, dirIdx) = mean(samplesForThisDir, 2);
-    end
-    
-    % Compute Euclidean distances from test samples to centroids
-    Ntest = size(testProjection, 2);
-    dists = zeros(Ntest, numDirections);
-    
-    for iTest = 1:Ntest
-        for dirIdx = 1:numDirections
-            % Compute squared Euclidean distance manually
-            diff = testProjection(:, iTest) - centroids(:, dirIdx);
-            dists(iTest, dirIdx) = sum(diff.^2);  % Squared Euclidean distance
-        end
-    end
-    
-    % For each test sample, pick the class (direction) with min distance:
-    [~, perSampleLabels] = min(dists, [], 2);  % Ntest x 1 integer labels
-    
-    % Aggregate a single final label (mode of all labels)
-    predictedLabel = mode(perSampleLabels);
-    
-    % Calculate confidence based on the distance to the closest centroid
-    % Confidence is inversely proportional to the distance to the closest centroid
-    closestDist = min(dists, [], 2);  % Smallest distance for each test sample
-    confidence = 1 / (1 + mean(closestDist));  % Inverse of the mean distance
-end
 
 
-function [output_lbl] = KNN_classifier(test_weight, train_weight, NN_num, pow, alp, method, type)
+function [output_lbl] = KNN_classifier(test_weight, train_weight, NN_num, pow, method, type)
 
-    if strcmp(method, 'hard')
-    % Input:
-    %  test_weight: Testing dataset after projection 
-    %  train_weight: Training dataset after projection
-    %  NN_num: Used to determine the number of nearest neighbors
-     
-        trainlen = size(train_weight, 2) / 8; 
-        k = max(1, round(trainlen / NN_num)); 
-    
-        output_lbl = zeros(1, size(test_weight, 2));
-    
-        for i = 1:size(test_weight, 2)
-            % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
-            distances = sum((train_weight - test_weight(:, i)).^2, 1);
-    
-            [~, indices] = sort(distances, 'ascend');
-            nearestIndices = indices(1:k);
-    
-        
-            trainLabels = ceil(nearestIndices / trainlen); 
-            modeLabel = mode(trainLabels);
-            output_lbl(i) = modeLabel;
-
-            % % Compute confidence (fraction of nearest neighbors voting for modeLabel)
-            % confidence(i) = sum(trainLabels == modeLabel) / k;
-            % % If confidence is below threshold, keep last known label
-            % if confidence(i) < confidence_threshold
-            %     output_lbl(i) = last_label;
-            % else
-            %     output_lbl(i) = modeLabel;
-            % end
-        end
-    end
+    % if strcmp(method, 'hard')
+    % % Input:
+    % %  test_weight: Testing dataset after projection 
+    % %  train_weight: Training dataset after projection
+    % %  NN_num: Used to determine the number of nearest neighbors
+    % 
+    %     trainlen = size(train_weight, 2) / 8; 
+    %     k = max(1, round(trainlen / NN_num)); 
+    % 
+    %     output_lbl = zeros(1, size(test_weight, 2));
+    % 
+    %     for i = 1:size(test_weight, 2)
+    %         % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
+    %         distances = sum((train_weight - test_weight(:, i)).^2, 1);
+    % 
+    %         [~, indices] = sort(distances, 'ascend');
+    %         nearestIndices = indices(1:k);
+    % 
+    % 
+    %         trainLabels = ceil(nearestIndices / trainlen); 
+    %         modeLabel = mode(trainLabels);
+    %         output_lbl(i) = modeLabel;
+    % 
+    %         % % Compute confidence (fraction of nearest neighbors voting for modeLabel)
+    %         % confidence(i) = sum(trainLabels == modeLabel) / k;
+    %         % % If confidence is below threshold, keep last known label
+    %         % if confidence(i) < confidence_threshold
+    %         %     output_lbl(i) = last_label;
+    %         % else
+    %         %     output_lbl(i) = modeLabel;
+    %         % end
+    %     end
+    % end
 
     if strcmp(method, 'soft')
         % Distance-weighted kNN
@@ -602,4 +354,25 @@ function [output_lbl] = KNN_classifier(test_weight, train_weight, NN_num, pow, a
             %     output_lbl(i) = last_label;
             end
         end
+end
+
+function data = fill_nan(data, data_type)
+    if strcmp(data_type, 'spikes')
+        data(isnan(data)) = 0;
+    end
+    
+    if strcmp(data_type, 'handpos')
+        % Forward fill
+        for r = 2:length(data)
+            if isnan(data(r))
+                data(r) = data(r-1);
+            end
+        end
+        % Backward fill for any remaining NaNs
+        for r = length(data)-1:-1:1
+            if isnan(data(r))
+                data(r) = data(r+1);
+            end
+        end
+    end
 end
