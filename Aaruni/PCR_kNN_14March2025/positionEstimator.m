@@ -1,16 +1,5 @@
 function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % POSITION ESTIMATOR (DECODER)
-    %
-    % This function decodes the (x,y) hand position from test data using the
-    % modelParameters produced during training. It performs the same
-    % preprocessing steps (trimming, padding, Gaussian filtering, and binning)
-    % and then uses PCA, LDA, kNN, and a simple RNN update to predict the hand position.
-    %
-    % newModelParameters is returned unmodified (the RNN here is stateless).
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    % % Initial Parameters
+    %% Initial Parameters
     % clc;close all;clear;
     % load('monkeydata_training.mat')
     % test_data = trial;
@@ -21,7 +10,6 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
     bin_group = 20;
     alpha = 0.3; % ema decay
-    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
 
@@ -29,15 +17,9 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     k = 20; % 8 for hard kNN and 20 for soft
     pow = 1; 
     alp = 1e-6; 
-    confidence_threshold = 0.5;
-
-    if ~isfield(modelParameters, 'actualLabel')
-        modelParameters.actualLabel = 1; % Default label
-    end
-
 
    %% Preprocess the trial data
-   preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
+   preprocessed_test = preprocessing(test_data, bin_group, alpha);
    neurons = size(preprocessed_test(1,1).rate, 1);
 
    %% Use indexing based on data given
@@ -46,46 +28,28 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
    %%  Remove low firing neurons for PCA and PCR
    spikes_test = extract_features(preprocessed_test, neurons, curr_bin/bin_group, 'nodebug');
-   % Apply Z-score normalization
-   mu = mean(spikes_test, 2);
-   sigma = std(spikes_test, 0, 2);
-   spikes_test = (spikes_test - mu) ./ sigma;
-
    removed_neurons = modelParameters.removeneurons;
    spikes_test(removed_neurons, :) = [];
-   % neurons = orig_neurons - length(removed_neurons);
 
    %% Reshape dataset
    spikes_test = reshape(spikes_test, [], 1);
 
    %% KNN calssification
    if curr_bin <= stop_idx 
-      % Classification is applicable within the time range
       train_weight = modelParameters.classify(idx).wTrain;
       test_weight =  modelParameters.classify(idx).wTest;
       meanFiringTrain = modelParameters.classify(idx).mean_firing;
        
       test_weight = test_weight' * (spikes_test(:) - meanFiringTrain(:));
       % Play around with hard and soft kNN. Soft kNN also has dist and exp types!
-      last_known_label = modelParameters.actualLabel; % Last known direction label
-      [outLabel, confidence] = KNN_classifier(test_weight, train_weight, k, confidence_threshold, last_known_label, pow, alp, 'soft', 'dist');
-      % [outLabel, confidence] = getKNNs_confidence1(test_weight, train_weight);
-
-      if confidence_threshold > confidence
-          outLabel = round(0.7 * modelParameters.actualLabel + 0.3 * outLabel);
-      end
+      outLabel = KNN_classifier(test_weight, train_weight, k, pow, alp, 'soft', 'dist');
 
     else 
-       % Beyond maxTime, use the last known label without re-classification
        outLabel = modelParameters.actualLabel;
     end
-    modelParameters.actualLabel = outLabel; % Update the actual label in model parameters
+    modelParameters.actualLabel = outLabel; 
     
     %% Estimate position using PCR results for both within and beyond maxTime
-    % Estimate the hand position using PCR, applicable for both within the specified 
-    % time range and beyond. This step uses regression coefficients and average firing 
-    % rates to calculate the X and Y coordinates of the hand position.
-    
     avX = modelParameters.averages(idx).avX(:,outLabel);
     avY =  modelParameters.averages(idx).avY(:,outLabel);
     mean_firing = modelParameters.pcr(outLabel, idx).f_mean;
@@ -99,29 +63,31 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     % Ridge Regression
     x_ridge = calculatePosition(spikes_test, mean_firing, bx_ridge, avX, curr_bin);
     y_ridge = calculatePosition(spikes_test, mean_firing, by_ridge, avY, curr_bin);
+    assignin("base", 'x_ridge', x_ridge);
+    assignin("base", 'y_ridge', y_ridge);
     
     % Lasso Regression
     x_lasso = calculatePosition(spikes_test, mean_firing, bx_lasso, avX, curr_bin);
     y_lasso = calculatePosition(spikes_test, mean_firing, by_lasso, avY, curr_bin);
+    assignin("base", 'x_lasso', x_lasso);
+    assignin("base", 'y_lasso', y_lasso);
     
     % Choose the best estimate (Weighted Average)
-    lambda_weight = 0.5; % Adjustable: 0 for Lasso only, 1 for Ridge only
+    lambda_weight = 1; % Adjustable: 0 for Lasso only, 1 for Ridge only
+    if isnan(x_lasso)
+        x_lasso = 0;
+    end
+    if isnan(y_lasso)
+        y_lasso = 0;
+    end
+    
     x = lambda_weight * x_ridge + (1 - lambda_weight) * x_lasso;
     y = lambda_weight * y_ridge + (1 - lambda_weight) * y_lasso;
-    
-    % x = calculatePosition(spikes_test, mean_firing, bx_ridge, avX, curr_bin);
-    % y = calculatePosition(spikes_test, mean_firing, by_ridge, avY, curr_bin);
-    % predicted = outLabel; %The predicted direction of movement
-
 end
 
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% HELPER FUNCTIONS %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
 
-function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, method)
-% function preprocessed_data = preprocessing(training_data, bin_group, alpha)
+function preprocessed_data = preprocessing(training_data, bin_group, alpha)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing trials in the following manner:
     % 1. Pad each trial’s spikes out to max_time_length
@@ -223,6 +189,7 @@ function data = fill_nan(data, data_type)
     end
 end
 
+
 %% Extract features
 function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -263,7 +230,7 @@ end
 
 
 %% kNN
-function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN_num, confidence_threshold, last_label, pow, alp, method, type)
+function output_lbl = KNN_classifier(test_weight, train_weight, NN_num, pow, alp, method, type)
 
     if strcmp(method, 'hard')
     % Input:
@@ -275,7 +242,6 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
@@ -284,19 +250,9 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             [~, indices] = sort(distances, 'ascend');
             nearestIndices = indices(1:k);
     
-        
             trainLabels = ceil(nearestIndices / trainlen); 
             modeLabel = mode(trainLabels);
             output_lbl(i) = modeLabel;
-
-            % Compute confidence (fraction of nearest neighbors voting for modeLabel)
-            confidence(i) = sum(trainLabels == modeLabel) / k;
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
-            else
-                output_lbl(i) = modeLabel;
-            end
         end
     end
 
@@ -316,7 +272,6 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
         k = max(1, round(trainlen / NN_num)); 
     
         output_lbl = zeros(1, size(test_weight, 2));
-        confidence = zeros(1, size(test_weight, 2)); % Store confidence
     
         for i = 1:size(test_weight, 2)
             % For the i-th test sample:
@@ -354,14 +309,7 @@ function [output_lbl, confidence] = KNN_classifier(test_weight, train_weight, NN
             p = angleWeights / sum(angleWeights);
             [~, bestAngle] = max(p);
             output_lbl(i) = bestAngle;
-
-            % Confidence: probability of predicted label
-            confidence(i) = p(bestAngle);
-    
-            % If confidence is below threshold, keep last known label
-            if confidence(i) < confidence_threshold
-                output_lbl(i) = last_label;
-            end
         end
     end
 end
+

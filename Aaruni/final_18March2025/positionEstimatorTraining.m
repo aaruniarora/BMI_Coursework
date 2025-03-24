@@ -43,28 +43,28 @@ function modelParameters = positionEstimatorTraining(training_data)
     orig_neurons = size(preprocessed_data(1,1).rate, 1);
 
     %% Remove data from neurons with low firing rates.
-    [spikes_mat, ~] = extract_features(preprocessed_data, orig_neurons, stop_idx/bin_group, 'nodebug');
-    removed_neurons = remove_neurons(spikes_mat, orig_neurons, 'nodebug');
+    [spikes_mat, ~] = extract_features(preprocessed_data, orig_neurons, stop_idx/bin_group);
+    removed_neurons = remove_neurons(spikes_mat, orig_neurons);
     neurons = orig_neurons - length(removed_neurons);
     modelParameters.removeneurons = removed_neurons;
     clear spikes_mat
 
     %% Dimensionality parameters
-    pca_threshold = 0.44; % =40 for cov and =0.44 for svd
-    lda_dim = 6;
  
     for curr_bin = 1: length(num_bins)
         %% Extract features/restructure data for further analysis
-        [spikes_matrix, labels] = extract_features(preprocessed_data, orig_neurons, num_bins(curr_bin), 'nodebug');
+        [spikes_matrix, labels] = extract_features(preprocessed_data, orig_neurons, num_bins(curr_bin));
         
         %% Remove data from neurons with low firing rates.
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
+        pca_threshold = 0.42; % =40 for cov and =0.44 for svd
+        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold);
 
         %% LDA to maximise class separability across different directions
-        [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
+        lda_dim = 6;
+        [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length);
 
         %% kNN training: store samples in LDA space with corresponding hand positions
         modelParameters.classify(curr_bin).dPCA_kNN = nPC;
@@ -95,7 +95,8 @@ function modelParameters = positionEstimatorTraining(training_data)
         for win_idx = 1:((stop_idx-start_idx)/bin_group)+1
     
             % Calculate regression coefficients and the windowed firing rates for the current time window and direction
-            [reg_coeff_X, reg_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, dir_idx, spikes_matrix, pca_threshold, time_interval, curr_X_pos, curr_Y_pos);
+            [reg_coeff_X, reg_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, dir_idx, ...
+                spikes_matrix, pca_threshold, time_interval, curr_X_pos, curr_Y_pos);
             % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
             
             % Store in model parameters
@@ -126,7 +127,6 @@ function preprocessed_data = preprocessing(training_data, bin_group, alpha)
     % filter_type: choose between 'EMA' and 'Gaussian' filtering
     % alpha: Smoothing factor (0 < alpha <= 1). A higher alpha gives more weight to the current data point.
     % sigma: gaussian filtering window
-    % debug: plots if debug=='debug'
 % Output:
     % preprocessed_data: preprocessed dataset with spikes and hand positions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -217,7 +217,7 @@ end
 
 %% HELPER FUNCTIONS FOR FEATURE EXTRACTION
 
-function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin, debug)
+function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Rearranging data as:
 % rows: 2744 time points --> 98 neurons x 28 bins
@@ -226,7 +226,6 @@ function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, 
     % preprocessed_data: input training data containing the spikes and hand positions
     % neurons: number of input neurons
     % curr_bin: current bin resolution in milliseconds
-    % debug: plots firing rate for the current bin
 % Outputs:
     % spikes_matrix: rearranged data
     % labels: direction labels for spikes_matrix (column matrix)
@@ -245,15 +244,10 @@ function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, 
             end
         end
     end
-
-    if strcmp(debug, 'debug')
-        figure; title(['Firing Rate for Bin ' num2str(curr_bin)]);
-        plot(spikes_matrix); 
-    end
 end
 
 
-function removed_neurons = remove_neurons(spike_matrix, neurons, debug)
+function removed_neurons = remove_neurons(spike_matrix, neurons)
     % Remove neurons with very low average firing rate for numerical stability.
     removed_neurons = []; 
     for neuronIdx = 1:neurons
@@ -262,15 +256,11 @@ function removed_neurons = remove_neurons(spike_matrix, neurons, debug)
             removed_neurons = [removed_neurons, neuronIdx]; 
         end
     end
-
-    if strcmp(debug, 'debug')
-        disp(removed_neurons);
-    end
 end
 
 %% HELPER FUNCTION FOR DIMENSIONALITY REDUCTION
 
-function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
+function [coeff, score, nPC] = perform_PCA(data, threshold)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Performs principal component analysis on the given data based on a given
 % threshold value.
@@ -278,7 +268,6 @@ function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
     % data: 
     % threshold: 
     % method:  
-    % debug:
 % Outputs:
     % coeff:
     % score:
@@ -296,14 +285,10 @@ function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
     score = data_centred * V * diag(1./sqrt(d));
     score = score(:, 1:nPC);
     coeff = V(:, 1:nPC);
-
-    if strcmp(debug, 'debug')
-        figure; plot(score);
-    end
 end
 
 
-function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, training_length, debug)
+function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, training_length)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Performs least discriminant analysis on the given data after PCA has
 % already been performed. This method is called MDF, most discriminant
@@ -351,11 +336,6 @@ function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, training
     
     % Mapping the mean-centered neural data to the discriminative space
     weights = outputs' * (data - overall_mean);  % [lda_dimension x samples]
-
-    if strcmp(debug, 'debug')
-        figure; plot(outputs); title('Output');
-        figure; plot(weights); title('Weight');
-    end
 end
 
 %% HELPER FUNCTION FOR PREPROCESSING OF HAND POSITIONS
@@ -437,7 +417,7 @@ spikes_matrix, pca_dimension, time_interval, curr_X_pos, curr_Y_pos)
     centered_win_firing = filtered_firing  - mean(filtered_firing ,1);
 
     % Perform PCA on the centered firing data to reduce dimensionality
-    [~, score, ~] = perform_PCA(centered_win_firing, pca_dimension, 'nodebug');
+    [~, score, ~] = perform_PCA(centered_win_firing, pca_dimension);
     principal_components = score' * centered_win_firing;
 
     % Calculate ridge regression coefficients for X and Y using the regression matrix
@@ -464,13 +444,8 @@ function filtered_firing = filter_firing_rate(spikes_matrix, time_div, time_inte
 % Output:
 %   filtered_firing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    % Filter the neural data to include only time points up to 'interval'
     timeFilter = time_div <= time_interval;
-    % Further filter the data to include only trials corresponding to 'directionIndex'
     directionFilter = labels == dir_idx;
     filtered_firing  = spikes_matrix(timeFilter, :);
-    % Center the filtered data by subtracting the mean firing rate across the selected trials
-    % for the specific direction. 
     filtered_firing  = filtered_firing (:, directionFilter) - mean(filtered_firing(:, directionFilter), 1);
 end

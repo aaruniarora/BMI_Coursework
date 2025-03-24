@@ -27,7 +27,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
    idx = min(max(floor((curr_bin - start_idx) / bin_group) + 1, 1), length(modelParameters.classify));
 
    %%  Remove low firing neurons for PCA and PCR
-   spikes_test = extract_features(preprocessed_test, neurons, curr_bin/bin_group, 'nodebug');
+   spikes_test = extract_features(preprocessed_test, neurons, curr_bin/bin_group);
    removed_neurons = modelParameters.removeneurons;
    spikes_test(removed_neurons, :) = [];
 
@@ -75,7 +75,6 @@ function preprocessed_data = preprocessing(training_data, bin_group, alpha)
     % filter_type: choose between 'EMA' and 'Gaussian' filtering
     % alpha: Smoothing factor (0 < alpha <= 1). A higher alpha gives more weight to the current data point.
     % sigma: gaussian filtering window
-    % debug: plots if debug=='debug'
 % Output:
     % preprocessed_data: preprocessed dataset with spikes and hand positions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -166,7 +165,7 @@ end
 
 
 %% Extract features
-function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, debug)
+function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Arranging data as:
 % rows: 2744 time points --> 98 neurons x 28 bins
@@ -183,11 +182,6 @@ function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, 
                 spikes_matrix(r_start:r_end,c_idx) = preprocessed_data(r,c).rate(:,k);  
             end
         end
-    end
-
-    if strcmp(debug, 'debug')
-        figure; title(['Firing Rate for Bin ' num2str(curr_bin)]);
-        plot(spikes_matrix); 
     end
 end
 
@@ -287,77 +281,3 @@ function output_lbl = KNN_classifier(test_weight, train_weight, NN_num, pow, alp
         end
     end
 end
-
-%% kNN
-% function [predictedLabel, confidence] = getKNNs_confidence1(testProjection, trainingProjection)
-%     % Replace kNN with a Nearest-Centroid approach.
-%     % Same inputs/outputs so it can directly replace your existing kNN code.
-%     %
-%     % Inputs:
-%     %   testProjection     - [D x Ntest] matrix: columns are test samples in LDA space.
-%     %   trainingProjection - [D x Ntrain] matrix: columns are training samples in LDA space.
-%     %   ldaDimension       - Not used here, but preserved for signature consistency.
-%     %   neighborhoodFactor - Not used here, but preserved for signature consistency.
-%     %
-%     % Outputs:
-%     %   predictedLabel  - Single integer label (1..8).
-%     %   confidence      - Single scalar in [0,1].
-%     %
-%     % -----------------------------------------------------------------------
-% 
-%     % Number of directions
-%     numDirections = 8;
-% 
-%     % Count how many total training samples there are for each direction:
-%     numTrialsPerDirection = size(trainingProjection, 2) / numDirections;
-% 
-%     % Build direction labels for each training sample [1..8].
-%     directionLabels = [ ...
-%         ones(1,numTrialsPerDirection), ...
-%         2*ones(1,numTrialsPerDirection), ...
-%         3*ones(1,numTrialsPerDirection), ...
-%         4*ones(1,numTrialsPerDirection), ...
-%         5*ones(1,numTrialsPerDirection), ...
-%         6*ones(1,numTrialsPerDirection), ...
-%         7*ones(1,numTrialsPerDirection), ...
-%         8*ones(1,numTrialsPerDirection) ...
-%     ];
-% 
-%     % Compute the centroid for each direction (mean over columns that belong to that direction).
-%     % trainingProjection is D x Ntrain. We'll gather columns belonging to each direction
-%     % and compute mean across them.
-%     centroids = zeros(size(trainingProjection,1), numDirections);  % (D x 8)
-%     for dirIdx = 1:numDirections
-%         colsForThisDir = (directionLabels == dirIdx);
-%         centroids(:, dirIdx) = mean(trainingProjection(:, colsForThisDir), 2);
-%     end
-% 
-%     % testProjection can have multiple columns (multiple test samples).
-%     % We'll classify each column (test sample) to the nearest centroid.
-%     % Then aggregate a single label + confidence in the same scalar form 
-%     % as the existing kNN code (which ends up returning one label/confidence).
-%     %
-%     % If you truly only ever call this with one test sample at a time, 
-%     % this loop effectively does a single pass anyway.
-%     %
-%     % Distances to centroids: (Ntest x 8)
-%     Ntest = size(testProjection, 2);
-%     dists = zeros(Ntest, numDirections);
-%     for iTest = 1:Ntest
-%         diffToCentroids = centroids - testProjection(:, iTest);
-%         dists(iTest,:) = sum(diffToCentroids.^2, 1);  % Euclidean^2 distance
-%     end
-% 
-%     % For each test sample, pick the class (direction) with min distance:
-%     [~, perSampleLabels] = min(dists, [], 2);  % Ntest x 1 integer labels
-% 
-%     % Just like your kNN code does 'mode(mode(...))', we reduce multiple test samples
-%     % to a single final label: 
-%     predictedLabel = mode(perSampleLabels);
-% 
-%     % A simple "confidence" measure: fraction of test samples that voted for predictedLabel.
-%     % This mimics how the kNN version lumps multiple test samples into a single label/confidence.
-%     votesForLabel = sum(perSampleLabels == predictedLabel);
-%     confidence = votesForLabel / Ntest;
-% end
-
