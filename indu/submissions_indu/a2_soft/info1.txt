@@ -1,0 +1,8 @@
+lda 6
+pca threshold 0.44
+soft knn dist
+classification 
+time 
+k 20
+pow 1
+len b mode 6

@@ -1,0 +1,15 @@
+{"time":"2025-03-17T13:18:00.0517829Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250317_131800-ztal4brc\\logs\\debug-core.log"}
+{"time":"2025-03-17T13:18:00.3399326Z","level":"INFO","msg":"created new stream","id":"ztal4brc"}
+{"time":"2025-03-17T13:18:00.3399326Z","level":"INFO","msg":"stream: started","id":"ztal4brc"}
+{"time":"2025-03-17T13:18:00.3399326Z","level":"INFO","msg":"handler: started","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:00.3404615Z","level":"INFO","msg":"sender: started","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:00.3404615Z","level":"INFO","msg":"writer: Do: started","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:00.624384Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-17T13:18:01.1577232Z","level":"INFO","msg":"stream: closing","id":"ztal4brc"}
+{"time":"2025-03-17T13:18:01.1577232Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-17T13:18:01.1585697Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-17T13:18:01.8968395Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-17T13:18:02.0509259Z","level":"INFO","msg":"handler: closed","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:02.0509259Z","level":"INFO","msg":"sender: closed","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:02.0509259Z","level":"INFO","msg":"writer: Close: closed","stream_id":"ztal4brc"}
+{"time":"2025-03-17T13:18:02.0509259Z","level":"INFO","msg":"stream: closed","id":"ztal4brc"}

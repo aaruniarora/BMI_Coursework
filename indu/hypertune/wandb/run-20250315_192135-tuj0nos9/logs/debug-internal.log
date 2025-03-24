@@ -1,0 +1,15 @@
+{"time":"2025-03-15T19:21:35.6686445Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250315_192135-tuj0nos9\\logs\\debug-core.log"}
+{"time":"2025-03-15T19:21:35.9120169Z","level":"INFO","msg":"created new stream","id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:35.9120169Z","level":"INFO","msg":"stream: started","id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:35.9120169Z","level":"INFO","msg":"handler: started","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:35.9120169Z","level":"INFO","msg":"writer: Do: started","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:35.9120169Z","level":"INFO","msg":"sender: started","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:36.3356081Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-15T19:21:36.8980289Z","level":"INFO","msg":"stream: closing","id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:36.8980289Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-15T19:21:36.8985367Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-15T19:21:37.8235381Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-15T19:21:38.0318195Z","level":"INFO","msg":"handler: closed","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:38.0318195Z","level":"INFO","msg":"writer: Close: closed","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:38.0318195Z","level":"INFO","msg":"sender: closed","stream_id":"tuj0nos9"}
+{"time":"2025-03-15T19:21:38.0323594Z","level":"INFO","msg":"stream: closed","id":"tuj0nos9"}

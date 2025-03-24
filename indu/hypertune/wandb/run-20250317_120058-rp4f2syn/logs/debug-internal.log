@@ -1,0 +1,15 @@
+{"time":"2025-03-17T12:00:58.4759031Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250317_120058-rp4f2syn\\logs\\debug-core.log"}
+{"time":"2025-03-17T12:00:58.6680879Z","level":"INFO","msg":"created new stream","id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:58.6680879Z","level":"INFO","msg":"stream: started","id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:58.6680879Z","level":"INFO","msg":"handler: started","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:58.6680879Z","level":"INFO","msg":"writer: Do: started","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:58.6680879Z","level":"INFO","msg":"sender: started","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:59.1743016Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-17T12:00:59.7235995Z","level":"INFO","msg":"stream: closing","id":"rp4f2syn"}
+{"time":"2025-03-17T12:00:59.7235995Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-17T12:00:59.7241186Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-17T12:01:00.8310396Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-17T12:01:01.2664043Z","level":"INFO","msg":"sender: closed","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:01:01.2664043Z","level":"INFO","msg":"writer: Close: closed","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:01:01.2664043Z","level":"INFO","msg":"handler: closed","stream_id":"rp4f2syn"}
+{"time":"2025-03-17T12:01:01.2669112Z","level":"INFO","msg":"stream: closed","id":"rp4f2syn"}
