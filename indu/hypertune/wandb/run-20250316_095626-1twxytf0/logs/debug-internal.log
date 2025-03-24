@@ -1,0 +1,15 @@
+{"time":"2025-03-16T09:56:26.0407746Z","level":"INFO","msg":"stream: starting","core version":"0.19.8","symlink path":"C:\\Users\\Indum\\Documents\\GitHub\\BMI_Coursework\\indu\\hypertune\\wandb\\run-20250316_095626-1twxytf0\\logs\\debug-core.log"}
+{"time":"2025-03-16T09:56:26.277582Z","level":"INFO","msg":"created new stream","id":"1twxytf0"}
+{"time":"2025-03-16T09:56:26.277582Z","level":"INFO","msg":"stream: started","id":"1twxytf0"}
+{"time":"2025-03-16T09:56:26.277582Z","level":"INFO","msg":"sender: started","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:26.277582Z","level":"INFO","msg":"handler: started","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:26.2781126Z","level":"INFO","msg":"writer: Do: started","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:26.6663111Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-03-16T09:56:27.1651762Z","level":"INFO","msg":"stream: closing","id":"1twxytf0"}
+{"time":"2025-03-16T09:56:27.1651762Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-03-16T09:56:27.1662324Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-03-16T09:56:28.0673008Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-03-16T09:56:28.2945015Z","level":"INFO","msg":"handler: closed","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:28.2945015Z","level":"INFO","msg":"writer: Close: closed","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:28.2945015Z","level":"INFO","msg":"sender: closed","stream_id":"1twxytf0"}
+{"time":"2025-03-16T09:56:28.2945015Z","level":"INFO","msg":"stream: closed","id":"1twxytf0"}
