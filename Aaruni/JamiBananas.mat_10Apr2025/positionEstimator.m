@@ -307,6 +307,7 @@ function output_lbl = KNN_classifier(test_weight, train_weight, NN_num, pow, alp
             if strcmp(type, 'dist')
                 weights = 1 ./ (nearestDist.^pow + eps);
             end
+            
             if strcmp(type, 'exp')
                 weights = exp(-alp .* nearestDist);
             end
