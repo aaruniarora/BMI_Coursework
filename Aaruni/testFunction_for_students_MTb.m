@@ -22,7 +22,7 @@ end
 % Set random number generator
 if use_rng
     rng(2013);
-    disp('rng set');
+    disp('rng set to 2013');
 else
     disp('No rng set');
 end
