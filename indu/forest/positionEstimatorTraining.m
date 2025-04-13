@@ -38,7 +38,7 @@ model_params.centroids = cluster_centroids;
 model_params.cluster_angle_mapping = cluster_angle_mapping;
 model_params.reach_angles = reach_angles;
 
-num_trees = 8; % Number of trees
+num_trees = 10; % Number of trees
 
 for angle = 1:num_angles
     for t = 1:num_bins
@@ -65,38 +65,45 @@ model_params.num_angles = num_angles;
 
 
 function forest = trainRandomForest(X, Y, num_trees)
-    % Train a simple Random Forest using manual decision trees
     forest = struct;
+    
+    % RF parameters
+    max_depth = 10;
+    min_samples_split = 2;
+    min_samples_leaf = 1;
+
     for i = 1:num_trees
-        % Bootstrap sampling
-        idx = randi(size(X,1), size(X,1), 1);
+        idx = randi(size(X,1), size(X,1), 1);  % Bootstrap sample
         X_sample = X(idx, :);
         Y_sample = Y(idx, :);
 
-        % Train a simple decision tree
-        forest(i).tree = trainDecisionTree(X_sample, Y_sample);
+        forest(i).tree = trainDecisionTree(X_sample, Y_sample, 0, max_depth, min_samples_split, min_samples_leaf);
     end
 end
 
-function tree = trainDecisionTree(X, Y)
-    % Simple recursive decision tree (manual implementation)
+ function tree = trainDecisionTree(X, Y, depth, max_depth, min_samples_split, min_samples_leaf)
     tree = struct;
-    tree.split_feature = randi(size(X,2)); % Random split feature
+
+    % Stopping conditions
+    if depth >= max_depth || size(X,1) < min_samples_split || numel(unique(Y)) == 1
+        tree.value = mean(Y(:));
+        return;
+    end
+
+    % Choose split
+    tree.split_feature = randi(size(X,2));
     tree.split_value = median(X(:, tree.split_feature));
 
+    % Split data
     left_idx = X(:, tree.split_feature) <= tree.split_value;
     right_idx = ~left_idx;
 
-    if sum(left_idx) > 1 && sum(right_idx) > 1
-        tree.left = trainDecisionTree(X(left_idx, :), Y(left_idx, :));
-        tree.right = trainDecisionTree(X(right_idx, :), Y(right_idx, :));
+    % Ensure both child nodes meet min_samples_leaf requirement
+    if sum(left_idx) >= min_samples_leaf && sum(right_idx) >= min_samples_leaf
+        tree.left = trainDecisionTree(X(left_idx, :), Y(left_idx, :), depth + 1, max_depth, min_samples_split, min_samples_leaf);
+        tree.right = trainDecisionTree(X(right_idx, :), Y(right_idx, :), depth + 1, max_depth, min_samples_split, min_samples_leaf);
     else
-        % Ensure the leaf node contains a scalar value
-        if isempty(Y)
-            tree.value = 0; % Default to 0 if empty
-        else
-            tree.value = mean(Y(:)); % Convert any vector to scalar
-        end
+        tree.value = mean(Y(:));
     end
 end
 
