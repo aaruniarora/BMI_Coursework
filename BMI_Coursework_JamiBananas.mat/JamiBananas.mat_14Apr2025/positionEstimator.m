@@ -388,6 +388,9 @@ function pos = position_calc(spikes_matrix, firing_mean, b, avg, curr_bin,reg_me
 %   b             - regression coefficients (from PCA-reduced space)
 %   avg           - average hand trajectory for the direction
 %   curr_bin      - current time step
+%   reg_meth      - regression method specified (standard, poly, ridge,
+%   lasso)
+%   polyd         - polynomial regression order
 % Output:
 %   pos           - estimated x or y position
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

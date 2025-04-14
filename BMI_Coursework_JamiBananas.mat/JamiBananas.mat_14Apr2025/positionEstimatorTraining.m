@@ -550,7 +550,9 @@ function [reg_coeff_X, reg_coeff_Y, filtered_firing ] = ...
 %   time_interval - vector of bin centers
 %   curr_X_pos    - current matrix of x-coordinates of hand pos for direction
 %   curr_Y_pos    - current matrix of y-coordinates of hand pos for direction
-%   method        - regression type: 'standard', 'ridge', or 'lasso'
+%   poly_degree   - polynomial regression order
+%   method        - regression type: 'standard', 'ridge', or 'lasso'or
+%   'poly'
 %
 % Outputs:
 %   reg_coeff_X/Y - learned regression coefficients for x and y hand
