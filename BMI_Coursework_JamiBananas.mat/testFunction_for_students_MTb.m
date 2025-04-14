@@ -131,7 +131,7 @@ elapsedTime = toc;
 rmpath(genpath(teamName))
 
 % Display the elapsed time
-fprintf('Execution time: %.2f seconds\n', elapsedTime);
+fprintf('\nExecution time: %.2f seconds\n', elapsedTime);
 fprintf('RMSE: %.4f\n', RMSE);
 fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
 fprintf('Classification Accuracy = %.2f%% \n', classificationAccuracy * 100);
