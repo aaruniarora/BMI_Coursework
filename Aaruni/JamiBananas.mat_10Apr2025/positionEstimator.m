@@ -1,84 +1,106 @@
 function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
-    %% Initial Parameters
-    % clc;close all;clear;
-    % load('monkeydata_training.mat')
-    % test_data = trial;
-    % rng(2013);
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% POSITION ESTIMATOR
+%
+% Uses trained model parameters to:
+%   1. Preprocess incoming spike data (binning, sqrt, smoothing)
+%   2. Extract and reshape features from the current trial
+%   3. Classify intended movement direction using soft kNN
+%   4. Predict x and y hand position using regression coefficients
+%
+% Inputs:
+%   test_data        - A struct representing a single trial
+%   modelParameters  - Learned parameters from training
+%
+% Outputs:
+%   x, y             - Estimated hand position (in mm)
+%   modelParameters  - Updated with current predicted direction label
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     %% Parameters
-    % [test_length, directions] = size(test_data); 
+    bin_group = 20; % Time bin width in ms
+    alpha = 0.3; % EMA smoothing factor
+    sigma = 50; % Std. deviation for Gaussian filter
 
-    bin_group = 20;
-    alpha = 0.3; % ema decay
-    sigma = 50;  % standard deviation in ms for gaussian
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
+    directions = modelParameters.directions; % get the number of angles
 
-    % Soft kNN parameters
-    k = 20; % 8 for hard kNN and 20 for soft
-    pow = 1; 
-    alp = 1e-6; 
+    %% Soft kNN parameters
+    k = 20;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
+    pow = 1;   % Power factor for distance-based weighting
+    alp = 1e-6; % Scaling for exponential weighting
 
    %% Preprocess the trial data
    preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
-   neurons = size(preprocessed_test(1,1).rate, 1);
+   neuron_len = size(preprocessed_test(1,1).rate, 1);
 
    %% Use indexing based on data given
    curr_bin = size(test_data.spikes, 2);
-   idx = min(max(floor((curr_bin - start_idx) / bin_group) + 1, 1), length(modelParameters.classify));
+   idx = min( max( floor( ( curr_bin - start_idx ) / bin_group) + 1, 1), length(modelParameters.class));
 
-   %%  Remove low firing neurons for PCA and PCR
-   spikes_test = extract_features(preprocessed_test, neurons, curr_bin/bin_group, 'nodebug');
+   %%  Remove low firing neurons for better accuracy
+   spikes_test = extract_features(preprocessed_test, neuron_len, curr_bin/bin_group, 'nodebug');
    removed_neurons = modelParameters.removeneurons;
    spikes_test(removed_neurons, :) = [];
 
-   %% Reshape dataset
+   %% Reshape dataset: Flatten spike data into column vector
    spikes_test = reshape(spikes_test, [], 1);
 
-   %% KNN calssification
+   %% Predict movement direction using kNN classification
    if curr_bin <= stop_idx 
-      train_weight = modelParameters.classify(idx).wTrain;
-      test_weight =  modelParameters.classify(idx).wTest;
-      meanFiringTrain = modelParameters.classify(idx).mean_firing;
+       % Extract LDA projections and mean firing for the current bin
+       train_weight = modelParameters.class(idx).lda_weights;
+       test_weight =  modelParameters.class(idx).lda_outputs;
+       curr_firing_mean = modelParameters.class(idx).mean_firing;
        
-      test_weight = test_weight' * (spikes_test(:) - meanFiringTrain(:));
-      % Play around with hard and soft kNN. Soft kNN also has dist and exp types!
-      outLabel = KNN_classifier(test_weight, train_weight, k, pow, alp, 'soft', 'dist');
+       % Project test spike vector to LDA space
+       test_weight = test_weight' * (spikes_test(:) - curr_firing_mean(:));
 
-    else 
-       outLabel = modelParameters.actualLabel;
-    end
-    modelParameters.actualLabel = outLabel; 
+       % Classify using soft kNN with distance-based weighting
+       output_label = KNN_classifier(directions, test_weight, train_weight, k, pow, alp, 'soft', 'dist');
+
+   else 
+       % After max time window, retain previous classification
+       output_label = modelParameters.actualLabel;
+   end
+
+    modelParameters.actualLabel = output_label; 
     
-    %% Estimate position using PCR results for both within and beyond maxTime
-    avX = modelParameters.averages(idx).avX(:,outLabel);
-    avY =  modelParameters.averages(idx).avY(:,outLabel);
-    meanFiring = modelParameters.pcr(outLabel, idx).f_mean;
-    bx = modelParameters.pcr(outLabel,idx).bx;
-    by = modelParameters.pcr(outLabel,idx).by;
+    %% Estimate hand position (x, y) using PCR model
+    av_X = modelParameters.averages(idx).av_X(:, output_label);
+    av_Y =  modelParameters.averages(idx).av_Y(:, output_label);
+    firing_mean = modelParameters.pcr(output_label, idx).f_mean;
+    bx = modelParameters.pcr(output_label, idx).bx;
+    by = modelParameters.pcr(output_label, idx).by;
     
-    x = calculatePosition(spikes_test, meanFiring, bx, avX, curr_bin);
-    y = calculatePosition(spikes_test, meanFiring, by, avY, curr_bin);
+    x = position_calc(spikes_test, firing_mean, bx, av_X, curr_bin);
+    y = position_calc(spikes_test, firing_mean, by, av_Y, curr_bin);
 end
 
 %% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
 
 function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Preprocessing trials in the following manner:
-    % 1. Pad each trial’s spikes out to max_time_length
-    % 2. Bin data to get the firing rate
-    % 3. Apply square root transformation
-    % 4. Smooth using a recursive filter, exponential moving average (EMA)
-% Inputs:
-    % training_data: input training data containing the spikes and hand positions
-    % bin_group: binning resolution in milliseconds
-    % filter_type: choose between 'EMA' and 'Gaussian' filtering
-    % alpha: Smoothing factor (0 < alpha <= 1). A higher alpha gives more weight to the current data point.
-    % sigma: gaussian filtering window
-    % debug: plots if debug=='debug'
+% Preprocessing function for spike trains
+%
+% Input:
+%   training_data - original neural dataset with spikes and hand positions
+%   bin_group     - number of ms per time bin (e.g., 20 ms)
+%   filter_type   - 'EMA' or 'Gaussian'
+%   alpha         - EMA smoothing constant (0 < alpha < 1)
+%   sigma         - std deviation for Gaussian smoothing (in ms)
+%   debug         - if 'debug', plots are shown
+%
 % Output:
-    % preprocessed_data: preprocessed dataset with spikes and hand positions
+%   preprocessed_data - struct with binned, smoothed firing rates per trial
+%
+% Steps:
+%   1. Pads all trials to max trial time length
+%   2. Bins spike counts over `bin_group` intervals
+%   3. Applies square root transform
+%   4. Applies either a recursive filter, exponential moving average (EMA),
+%      or Gaussian smoothing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Initialise
@@ -89,7 +111,7 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
     max_time_length = max(cellfun(@(sc) size(sc, 2), spike_cells));
     clear spike_cells;
 
-    % Pad each trial’s spikes out to max_time_length
+    % Fill NaNs with 0's and pad each trial’s spikes out to max_time_length
     for tl = 1:rows
         for dir = 1:cols
             curr_spikes = training_data(tl, dir).spikes; 
@@ -162,6 +184,15 @@ end
 
 
 function gKernel = gaussian_filter(bin_group, sigma)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Generates a normalized 1D Gaussian kernel for convolution
+% Inputs:
+%   bin_group - bin size in ms
+%   sigma     - standard deviation of the Gaussian in ms
+% Output:
+%   gKernel   - 1D vector of Gaussian filter values
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
     % Create a 1D Gaussian kernel centered at zero.
     gaussian_window = 10*(sigma/bin_group);
     e_std = sigma/bin_group;
@@ -174,7 +205,16 @@ end
 
 
 function ema_spikes = ema_filter(sqrt_spikes, alpha, num_neurons)
-    % Runs exponential moving average filter on the given data
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Applies exponential moving average (EMA) smoothing to spike data
+% Inputs:
+%   sqrt_spikes  - sqrt-transformed spike matrix [neurons x time bins]
+%   alpha        - smoothing factor (higher = more recent weight)
+%   num_neurons  - number of input neurons
+% Output:
+%   ema_spikes   - smoothed spike matrix
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     ema_spikes = zeros(size(sqrt_spikes)); 
     for n = 1:num_neurons
         for t = 2:size(sqrt_spikes, 2)
@@ -185,6 +225,16 @@ end
 
 
 function data = fill_nan(data, data_type)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Fills NaN values in spike or hand position data
+% For spikes the NaN values are replaced with 0's and for hand position
+% data we perform a forward then a backward fill.
+% Inputs:
+%   data       - input vector/matrix
+%   data_type  - 'spikes' or 'handpos'
+% Output:
+%   data       - cleaned data with NaNs filled
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     if strcmp(data_type, 'spikes')
         data(isnan(data)) = 0;
@@ -207,22 +257,37 @@ function data = fill_nan(data, data_type)
 end
 
 
-%% Extract features
-function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, debug)
+%% HELPER FUNCTIONS FOR FEATURE EXTRACTION
+
+function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Arranging data as:
+% Converts 2D spike data into a 2D matrix of features across bins
+% In our case, rearranging data as:
 % rows: 2744 time points --> 98 neurons x 28 bins
 % cols: 800 --> 8 angles and 100 trials so angle 1, trial 1; angle 1, trial 2; ...; angle 8, Trial 100
+%
+% Inputs:
+%   preprocessed_data - output from preprocessing function
+%   neurons           - number of neurons before filtering
+%   curr_bin          - number of bins to include (time window)
+%   debug             - 'debug' enables plotting
+%
+% Outputs:
+%   spikes_matrix     - matrix [neurons*curr_bin x trials]
+%   labels            - direction labels for each column (trial)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    [rows, cols] = size(preprocessed_data); % 98 x 16
+
+    [rows, cols] = size(preprocessed_data);
+    labels = zeros(rows * cols, 1);
     
-    for r = 1:rows % 98
-        for c = 1:cols % 16
+    for r = 1:rows
+        for c = 1:cols
             for k = 1:curr_bin
                 c_idx = rows * (c - 1) + r; % 100 (1 - 1) + 1 = 1; 1; 1...x13; 101; 
                 r_start = neurons * (k - 1) + 1; % 98 (1 - 1) + 1 = 1; 99; 197;...
                 r_end = neurons * k; % 98; 196;...
                 spikes_matrix(r_start:r_end,c_idx) = preprocessed_data(r,c).rate(:,k);  
+                labels(c_idx) = c; 
             end
         end
     end
@@ -234,99 +299,102 @@ function spikes_matrix = extract_features(preprocessed_data, neurons, curr_bin, 
 end
 
 
-%% Helper function for position calculation
-function pos = calculatePosition(neuraldata, meanFiring, b, av, curr_bin)
-    pos = (neuraldata(1:length(b)) - mean(meanFiring))' * b + av;
-    % pos = ((neuraldata(1:length(b)) - meanFiring))' * b + av;
+%% HELPER FUNCTION TO PERFORM CLASSIFICATION WITH kNN
+
+function output_label = KNN_classifier(directions, test_weight, train_weight, NN_num, pow, alp, method, type)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Predicts direction label using either hard or soft k-nearest neighbours (kNN).
+%
+% Inputs:
+%   test_weight  - [lda_dim x 1] test sample in LDA space
+%   train_weight - [lda_dim x n_samples] training set in LDA space
+%   NN_num       - neighbor divisor for k calculation
+%   pow          - exponent for inverse-distance weighting (soft)
+%   alp          - alpha for exponential soft weighting
+%   method       - 'hard' or 'soft'
+%   type         - 'dist' (1/distance^pow) or 'exp' (exp(-alpha * d))
+%
+% Output:
+%   output_lbl   - predicted movement direction label
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    train_len = size(train_weight, 2) / directions; 
+    k = max(1, round(train_len / NN_num)); 
+
+    output_label = zeros(1, size(test_weight, 2));
+    
+    for i = 1:size(test_weight, 2)
+        % For the i-th test sample:
+        distances = sum((train_weight - test_weight(:, i)).^2, 1);
+
+        % Sort and get top-k nearest neighbors
+        [sorted_dist, sorted_idx] = sort(distances, 'ascend');
+        nearest_idx    = sorted_idx(1:k);
+        nearest_dist   = sorted_dist(1:k);
+
+        % Convert index -> direction label
+        % If train_weight is grouped angle-by-angle, we do this:
+        train_labels = ceil(nearest_idx / train_len);  % each from 1..8
+
+        switch method
+            case 'soft'
+
+                % Compute distance-based weights, e.g. 1/d^2
+                if strcmp(type, 'dist')
+                    weights = 1 ./ (nearest_dist.^pow + eps);
+                
+                elseif strcmp(type, 'exp')
+                    weights = exp(-alp .* nearest_dist);
+                end
+        
+                % Sum up weights for each angle
+                angle_weights = zeros(1, directions);
+                
+                for nn = 1:k
+                    angle = train_labels(nn); 
+                    angle_weights(angle) = angle_weights(angle) + weights(nn);
+                end
+                
+                % % Final predicted label is the angle with the highest sum of weights
+                % [~, best_angle] = max(angleWeights);
+                % output_label(i) = best_angle;
+        
+                % Or we can use probability distribution
+                p = angle_weights / sum(angle_weights);
+                [~, best_angle] = max(p);
+                output_label(i) = best_angle;
+        
+            case 'hard'
+                output_label(i) = mode(train_labels);
+        
+            otherwise
+                error("Incorrect kNN method! Choose between 'hard' and 'soft'.");
+        end
+    end
+end
+
+
+%% HELPER FUNCTION FOR POSITION CALCULATION
+
+function pos = position_calc(spikes_matrix, firing_mean, b, avg, curr_bin)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Calculates hand position using linear regression from spike activity
+%
+% Inputs:
+%   spikes_matrix - spike vector (after preprocessing and reshaping)
+%   firing_mean   - mean firing vector used to center the data
+%   b             - regression coefficients (from PCA-reduced space)
+%   avg           - average hand trajectory for the direction
+%   curr_bin      - current time step
+% Output:
+%   pos           - estimated x or y position
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    pos = (spikes_matrix(1:length(b)) - mean(firing_mean))' * b + avg;
+
     try
         pos = pos(curr_bin, 1);
     catch
         pos = pos(end, 1); % Fallback to last position if specific T_end is not accessible
     end
-end
 
-
-%% kNN
-function output_lbl = KNN_classifier(test_weight, train_weight, NN_num, pow, alp, method, type)
-
-    if strcmp(method, 'hard')
-    % Input:
-    %  test_weight: Testing dataset after projection 
-    %  train_weight: Training dataset after projection
-    %  NN_num: Used to determine the number of nearest neighbors
-     
-        trainlen = size(train_weight, 2) / 8; 
-        k = max(1, round(trainlen / NN_num)); 
-    
-        output_lbl = zeros(1, size(test_weight, 2));
-    
-        for i = 1:size(test_weight, 2)
-            % distances = sum(bsxfun(@minus, train_weight, test_weight(:, i)).^2, 1);
-            distances = sum((train_weight - test_weight(:, i)).^2, 1);
-    
-            [~, indices] = sort(distances, 'ascend');
-            nearestIndices = indices(1:k);
-    
-            trainLabels = ceil(nearestIndices / trainlen); 
-            modeLabel = mode(trainLabels);
-            output_lbl(i) = modeLabel;
-        end
-    end
-
-    if strcmp(method, 'soft')
-        % Distance-weighted kNN
-        %
-        % Inputs:
-        %  test_weight: [projDim x #TestSamples]  (the LDA-projected test sample(s))
-        %  train_weight: [projDim x #TrainSamples]
-        %  NN_num: sets how we pick k, i.e. k = trainlen/NN_num or similar
-        %
-        % Output:
-        %  output_lbl: predicted direction label for each test sample
-
-        nAngles = 8;  % you have 8 reaching angles
-        trainlen = size(train_weight, 2) / nAngles; 
-        k = max(1, round(trainlen / NN_num)); 
-    
-        output_lbl = zeros(1, size(test_weight, 2));
-    
-        for i = 1:size(test_weight, 2)
-            % For the i-th test sample:
-            distances = sum((train_weight - test_weight(:, i)).^2, 1);
-    
-            % Sort and get top-k nearest neighbors
-            [sortedDist, sortedIdx] = sort(distances, 'ascend');
-            nearestIdx    = sortedIdx(1:k);
-            nearestDist   = sortedDist(1:k);
-    
-            % Convert index -> direction label
-            % If train_weight is grouped angle-by-angle, we do this:
-            trainLabels = ceil(nearestIdx / trainlen);  % each from 1..8
-    
-            % Compute distance-based weights, e.g. 1/d^2
-            if strcmp(type, 'dist')
-                weights = 1 ./ (nearestDist.^pow + eps);
-            end
-            
-            if strcmp(type, 'exp')
-                weights = exp(-alp .* nearestDist);
-            end
-    
-            % Sum up weights for each angle
-            angleWeights = zeros(1, nAngles);
-            for nn = 1:k
-                angle = trainLabels(nn); 
-                angleWeights(angle) = angleWeights(angle) + weights(nn);
-            end
-            
-            % % Final predicted label is the angle with the highest sum of weights
-            % [~, bestAngle] = max(angleWeights);
-            % output_lbl(i) = bestAngle;
-    
-            % Or we can use probability distribution
-            p = angleWeights / sum(angleWeights);
-            [~, bestAngle] = max(p);
-            output_lbl(i) = bestAngle;
-        end
-    end
 end
