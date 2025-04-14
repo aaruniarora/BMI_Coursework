@@ -1,14 +1,15 @@
-clc 
-close all
+clc; close all; clear all;
 
 %%
+load('monkeydata_training.mat')
 trialElement = trial(2,2);  % Extract one element (1st trial, 1st angle)
 disp(trialElement);         % Display structure fields
 
 %%
 figure;
+[neurons, spikeCount] = size(trial(2,2).spikes);
 % Extract spike data for the specific trial and angle, and slice time steps from 300 to 572
-timeSteps = 301:length(spikeCount)-100
+timeSteps = 301:length(spikeCount)-100;
 spikeData = trial(2, 2).spikes(:, timeSteps); 
 
 % Plot spike activity for the selected time range
