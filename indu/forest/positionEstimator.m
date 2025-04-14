@@ -69,6 +69,7 @@ reach_angles = modelParameters.reach_angles;
 
 % Identify movement direction (use a classifier or predefined method)
 [~, angle_idx] = min(abs(reach_angles - predicted_reach_angle));
+modelParameters.actualLabel = angle_idx;
 
 decoded_x = zeros(1, num_bins);
 decoded_y = zeros(1, num_bins);
