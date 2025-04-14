@@ -147,6 +147,5 @@ end
 
 disp(['Making sure mean RMSE here is the same as their formula: ' num2str(mean(meanRMSE_perBin))]);
 
-if figname, save_figure(gcf, 'figures', figname, 'pdf'); end
-
+if figname, save_figure(gcf, 'figures', figname, 'pdf', 'vector', false); end
 end
