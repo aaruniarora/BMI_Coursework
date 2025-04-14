@@ -6,10 +6,12 @@
 % "positionEstimator" to decode the trajectory. 
 
 %%
-function RMSE = testFunction_for_students_MTb(teamName, figname, use_rng)
+function RMSE = testFunction_for_students_MTb(teamName, figname, format, use_rng)
 
 % Check if use_rng argument is provided, otherwise default to true
-if nargin < 3, use_rng = true; end
+if nargin < 2, figname = 'try'; end
+if nargin < 3, format = 'none'; end
+if nargin < 4, use_rng = true; end
 
 % Set random number generator
 if use_rng
@@ -112,6 +114,6 @@ fprintf('RMSE: %.4f\n', RMSE);
 fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
 fprintf('Classification Accuracy = %.2f%% \n', classificationAccuracy * 100);
 
-save_figure(gcf, 'figures', figname, 'pdf');
+save_figure(gcf, 'figures', figname, format);
 
 end
