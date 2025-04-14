@@ -9,7 +9,7 @@
 function RMSE = testFunction_for_students_MTb(teamName, figname, use_rng)
 
 % Check if use_rng argument is provided, otherwise default to true
-if nargin < 2, figname = NaN; end
+if nargin < 2, figname = ''; end
 if nargin < 3, use_rng = true; end
 
 % Set random number generator
@@ -147,5 +147,5 @@ end
 
 disp(['Making sure mean RMSE here is the same as their formula: ' num2str(mean(meanRMSE_perBin))]);
 
-if figname, save_figure(gcf, 'figures', figname, 'pdf', 'vector', false); end
+if ~isempty(figname), save_figure(gcf, 'figures', figname, 'pdf', 'vector', false); end
 end
