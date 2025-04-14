@@ -146,5 +146,7 @@ for i = 1:nBins
     fprintf('%10d     |     %6.2f     | %.2f\n', timeBins(i), accuracy_perBin(i)*100, meanRMSE_perBin(i));
 end
 
+disp(['Making sure mean RMSE here is the same as their formula: ' mean(meanRMSE_perBin)]);
+
 save_figure(gcf, 'figures', figname, format);
 end
