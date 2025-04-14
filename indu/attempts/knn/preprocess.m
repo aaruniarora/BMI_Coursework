@@ -2,7 +2,7 @@ clc
 clear all
 
 load('monkeydata_training.mat');
-num = 80;
+num = 100;
 training_data = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 %%
@@ -190,6 +190,7 @@ title('LDA Classification of PCA-Reduced Data');
 colormap jet;
 colorbar;
 grid on;
+exportgraphics(gcf, 'lda.pdf', 'ContentType', 'vector')
 
 end
 %%

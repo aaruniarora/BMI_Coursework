@@ -2,7 +2,7 @@ clc
 clear all
 
 load('monkeydata_training.mat');
-num = 2;
+num = 100;
 trainingData = trial(1:num, :);   % First 10 trials for training
 testData = trial(num+1:end, :);  
 trial = trainingData; % Remaining trials for testing
@@ -130,7 +130,7 @@ end
 W = W(:, idx);
 
 % Project the data onto the first few eigenvectors (the most significant ones)
-num_LDA_components = 2; % We choose 2 components for visualization
+num_LDA_components = 3; % We choose 2 components for visualization
 X_lda = X_reduced * W(:, 1:num_LDA_components);
 
 %%
