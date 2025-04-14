@@ -6,12 +6,11 @@
 % "positionEstimator" to decode the trajectory. 
 
 %%
-function RMSE = testFunction_for_students_MTb(teamName, figname, format, use_rng)
+function RMSE = testFunction_for_students_MTb(teamName, figname, use_rng)
 
 % Check if use_rng argument is provided, otherwise default to true
-if nargin < 2, figname = 'try'; end
-if nargin < 3, format = 'none'; end
-if nargin < 4, use_rng = true; end
+if nargin < 2, figname = NaN; end
+if nargin < 3, use_rng = true; end
 
 % Set random number generator
 if use_rng
@@ -146,7 +145,8 @@ for i = 1:nBins
     fprintf('%10d     |     %6.2f     | %.2f\n', timeBins(i), accuracy_perBin(i)*100, meanRMSE_perBin(i));
 end
 
-disp(['Making sure mean RMSE here is the same as their formula: ' mean(meanRMSE_perBin)]);
+disp(['Making sure mean RMSE here is the same as their formula: ' num2str(mean(meanRMSE_perBin))]);
 
-save_figure(gcf, 'figures', figname, format);
+if figname, save_figure(gcf, 'figures', figname, 'pdf'); end
+
 end
