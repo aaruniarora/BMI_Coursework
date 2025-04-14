@@ -45,6 +45,14 @@ correctCount   = 0;  % how many times we guessed the right direction
 totalCount     = 0;  % how many direction predictions we made
 predictedLabel = zeros(size(testData,1), 8); 
 
+% Initialize storage for per-bin statistics
+timeBins = 320:20:560;  % same as 'times'
+nBins = length(timeBins);
+correctPerBin = zeros(1, nBins);
+totalPerBin = zeros(1, nBins);
+squaredErrorPerBin = zeros(1, nBins);
+countPerBin = zeros(1, nBins);
+
 figure
 hold on
 axis square
@@ -78,8 +86,22 @@ for tr=1:size(testData,1)
             decodedPos = [decodedPosX; decodedPosY];
             decodedHandPos = [decodedHandPos decodedPos];
 
-            meanSqError = meanSqError + norm(testData(tr,direc).handPos(1:2,t) - decodedPos)^2;
+            meanSqError = meanSqError + norm(testData(tr,direc).handPos(1:2,t) - decodedPos)^2;          
+            
+            % RMSE per bin
+            binIdx = find(timeBins == t);
+            squaredError = norm(testData(tr,direc).handPos(1:2,t) - decodedPos)^2;
+            squaredErrorPerBin(binIdx) = squaredErrorPerBin(binIdx) + squaredError;
+            countPerBin(binIdx) = countPerBin(binIdx) + 1;
+            
+            % Classification per bin
+            if modelParameters.actualLabel == direc
+                correctPerBin(binIdx) = correctPerBin(binIdx) + 1;
+            end
+            totalPerBin(binIdx) = totalPerBin(binIdx) + 1;
+
         end
+
         n_predictions = n_predictions+length(times);
         hold on
         plot(decodedHandPos(1,:),decodedHandPos(2,:), 'r');
@@ -114,6 +136,15 @@ fprintf('RMSE: %.4f\n', RMSE);
 fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
 fprintf('Classification Accuracy = %.2f%% \n', classificationAccuracy * 100);
 
-save_figure(gcf, 'figures', figname, format);
+% Final stats per time bin
+meanRMSE_perBin = sqrt(squaredErrorPerBin ./ countPerBin);
+accuracy_perBin = correctPerBin ./ totalPerBin;
+% Display as table
+fprintf('\nTime Bin (ms) | Accuracy (%%) | RMSE\n');
+fprintf('--------------|---------------|--------\n');
+for i = 1:nBins
+    fprintf('%10d     |     %6.2f     | %.2f\n', timeBins(i), accuracy_perBin(i)*100, meanRMSE_perBin(i));
+end
 
+save_figure(gcf, 'figures', figname, format);
 end
