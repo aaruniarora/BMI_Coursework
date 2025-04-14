@@ -209,29 +209,6 @@ function [score, coeff] = covPCA(X, numPC)
     % normFactors = sqrt(sum(score.^2, 1));  % 1 x nPC vector, norm of each column
     % score = score ./ repmat(normFactors, size(score, 1), 1);
 end
-%%
-% %%
-% function [d_reduced,coeff,num_PC,V] = applyPCA(data)
-% d_mean = mean(data, 1);
-% d_norm = data - d_mean; % Center data (zero mean)
-% 
-% % Compute SVD
-% [U, S, V] = svd(d_norm, 'econ');
-% 
-% % Compute variance explained
-% singular_values = diag(S);
-% explained_variance = (singular_values.^2) / sum(singular_values.^2);
-% cum_variance = cumsum(explained_variance);
-% 
-% % Choose number of principal components to retain 95% variance
-% variance_threshold = 0.95;
-% num_PC = find(cum_variance >= variance_threshold, 1);
-% 
-% % Reduce data dimensionality
-% coeff = V(:,1:num_PC);
-% d_reduced = d_norm * V(:,1:num_PC); % Project onto principal components
-% end
-%%
     function [lda_component,predicted_labels,angle_labels] = applyLDA(d_reduced,num_trials,num_angles,num_PC,lda_no)
 %Manual LDA Implementation
 % Define class labels (use angles as class labels)

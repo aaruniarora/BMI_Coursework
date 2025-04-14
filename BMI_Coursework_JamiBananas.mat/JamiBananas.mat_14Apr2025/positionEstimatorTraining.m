@@ -47,6 +47,8 @@ function modelParameters = positionEstimatorTraining(training_data)
     modelParameters.start_idx = start_idx;
     modelParameters.stop_idx  = stop_idx;
     modelParameters.directions = directions;
+    modelParameters.trial_id = 0;
+    modelParameters.iterations = 0;
 
     %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smoothing
     preprocessed_data = preprocessing(training_data, bin_group, 'EMA', alpha, sigma, 'nodebug');

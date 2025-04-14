@@ -27,6 +27,10 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     directions = modelParameters.directions; % get the number of angles
     polyDegree = modelParameters.polyd;
 
+    if ~isfield(modelParameters, 'actLabel')
+        modelParameters.actLabel = []; % Default label
+    end
+
     %% Soft kNN parameters
     k = 20;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
     pow = 1;   % Power factor for distance-based weighting
@@ -63,8 +67,50 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
    else 
        % After max time window, retain previous classification
+       % output_label = mode(modelParameters.actLabel);
        output_label = modelParameters.actualLabel;
    end
+
+    % if modelParameters.trial_id == 0
+    % modelParameters.trial_id = test_data.trialId;
+    % else 
+    % if modelParameters.trial_id ~= test_data.trialId
+    %     modelParameters.iterations = 0;
+    %     modelParameters.trial_id = test_data.trialId;
+    %     modelParameters.actLabel = [];
+    % end
+    % end
+    % modelParameters.iterations = modelParameters.iterations + 1;
+    % 
+    % % disp(modelParameters.actualLabel)
+    % 
+    % %% Reset `actualLabel` if there are repeated inconsistencies
+    % if ~isempty(modelParameters.actLabel)
+    %     if modelParameters.actLabel(end) ~= output_label
+    %         if length(modelParameters.actLabel) > 10 && sum(modelParameters.actLabel(end-4:end) ~= output_label) >= 5
+    %             % If the last 5 classifications contain at least 3 mismatches, reset
+    %             modelParameters.actLabel = [];
+    %         end
+    %     end
+    % end
+    % 
+    % len_b_mode = 7;
+    % % Update the actual label in model parameters
+    % if ~isempty(modelParameters.actLabel)
+    % 
+    % % Accumulate stable labels before following the mode
+    % if length(modelParameters.actLabel) > len_b_mode  % Wait until there are at least 5 labels
+    %     output_label = mode(modelParameters.actLabel);
+    % end
+    % modelParameters.actLabel(end+1) = output_label;
+    % modelParameters.actLabel(:) = output_label;  % Ensure all entries are consistent
+    % else
+    %     % For the very first classification, just set the label
+    %     modelParameters.actLabel(end+1) = output_label;
+    % end 
+    % 
+    % output_label = modelParameters.actLabel(end);
+    % modelParameters.actualLabel = modelParameters.actLabel(end); 
 
     modelParameters.actualLabel = output_label; 
     
