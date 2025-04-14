@@ -12,7 +12,7 @@ function RMSE = testFunction_for_students_MTb(teamName, use_rng)
 tic
 
 % load monkeydata_training.mat
-load monkeydata0.mat
+load monkeydata_training.mat
 
 % Check if use_rng argument is provided, otherwise default to true
 if nargin < 2

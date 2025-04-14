@@ -130,7 +130,7 @@ testingTimeBins = startBin:timeBin:endBin;
 
 % Compute PCR regression coefficients for each direction and time window.
 % Compute PCR regression coefficients using Polynomial Regression for each direction and time window.
-polyDegree = 1;  % Degree of polynomial regression
+polyDegree = 2;  % Degree of polynomial regression
 modelParameters.polyd = polyDegree;
 
 for directionIdx = 1:numDirections
@@ -146,8 +146,11 @@ for directionIdx = 1:numDirections
         % Extract firing rates corresponding to the current time window and direction.
         windowedFiringRates = aggregatedFiringRates(timeBinsForFiring <= testingTimeBins(timeWindowIdx), directionLabels == directionIdx);
         [pcaEigenVectors, ~] = performPCA(windowedFiringRates);
+        size(pcaEigenVectors)
 
         % Project the windowed firing data onto principal components.
+        size(pcaEigenVectors(:, 1:numPCADimensions)')
+        size((windowedFiringRates - mean(windowedFiringRates, 1)))
         Z = pcaEigenVectors(:, 1:numPCADimensions)' * (windowedFiringRates - mean(windowedFiringRates, 1));
 
         % Expand Z with polynomial features

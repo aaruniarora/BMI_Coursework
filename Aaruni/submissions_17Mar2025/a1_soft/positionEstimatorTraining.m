@@ -86,7 +86,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     % modelParameters.kmean_c.kMeansCentroids = centroids;
 
     %%
-    pca_threshold = 0.44;
+    pca_threshold = 0.44; % =40 for cov and =0.95 for svd
     lda_dim = 6;
 
     for curr_bin = 1: length(num_bins)
@@ -97,12 +97,10 @@ function modelParameters = positionEstimatorTraining(training_data)
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-     % =40 for cov and =0.95 for svd
         [coeff, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'cov', 'nodebug');
         % disp(nPC)
 
         %% LDA to maximise class separability across different directions
-     
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
 
 
@@ -667,6 +665,9 @@ function FilteredFiring = filterFiringData(neuraldata, timeDivision, interval, l
     % for the specific direction. 
     FilteredFiring  = FilteredFiring (:, directionFilter) - mean(FilteredFiring(:, directionFilter), 1);
 end
+
+
+
 
 
 
