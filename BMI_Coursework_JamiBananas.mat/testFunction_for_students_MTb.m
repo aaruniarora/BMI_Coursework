@@ -6,26 +6,24 @@
 % "positionEstimator" to decode the trajectory. 
 
 %%
-function RMSE = testFunction_for_students_MTb(teamName, use_rng)
+function RMSE = testFunction_for_students_MTb(teamName, figname, use_rng)
+
+% Check if use_rng argument is provided, otherwise default to true
+if nargin < 3, use_rng = true; end
+
+% Set random number generator
+if use_rng
+    rng(2013);
+    disp('rng set to 2013');
+else
+    disp('No rng set');
+end
 
 % Star time
 tic
 
 % load monkeydata_training.mat
 load monkeydata0.mat
-
-% Check if use_rng argument is provided, otherwise default to true
-if nargin < 2
-    use_rng = true;
-end
-
-% Set random number generator
-if use_rng
-    rng(2013);
-    disp('rng set');
-else
-    disp('No rng set');
-end
 
 ix = randperm(length(trial));
 
@@ -113,5 +111,7 @@ fprintf('Execution time: %.2f seconds\n', elapsedTime);
 fprintf('RMSE: %.4f\n', RMSE);
 fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
 fprintf('Classification Accuracy = %.2f%% \n', classificationAccuracy * 100);
+
+save_figure(gcf, 'figures', figname, 'pdf');
 
 end

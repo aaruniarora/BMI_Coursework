@@ -1,23 +1,24 @@
 % Use this to run in command window: [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold('PCR_kNN_08March2025', 10);
 function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName, k, use_rng)
-    % Start timing
-    tic
-
-    % Load dataset
-    load monkeydata0.mat
-
+   
     % Check if use_rng argument is provided, otherwise default to true
-    if nargin < 2
+    if nargin < 3
         use_rng = false;
     end
     
     % Set random number generator
     if use_rng
         rng(2013);
-        disp('rng set');
+        disp('rng set to 2013');
     else
         disp('No rng set');
     end
+
+    % Start timing
+    tic
+
+    % Load dataset
+    load monkeydata0.mat
 
     ix = randperm(length(trial));
 
