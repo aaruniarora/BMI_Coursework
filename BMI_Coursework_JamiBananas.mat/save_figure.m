@@ -1,7 +1,7 @@
 function save_figure(figHandle, outFolder, name, format, type, replace_fig)
 
     if nargin < 5 || isempty(type)
-        type = 'vector';
+        type = 'vector'; %'image'
     end
     if nargin < 6
         replace_fig = false; % Default: do not replace the exisitng figure
