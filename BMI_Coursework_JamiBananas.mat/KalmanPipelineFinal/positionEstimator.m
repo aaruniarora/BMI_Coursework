@@ -1,129 +1,153 @@
 function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% POSITION ESTIMATOR (KF Version with Time‐Window Indexing)
+% POSITION ESTIMATOR
 %
-% Decodes the current hand position from a test trial using the pre-trained
-% model parameters. This version uses the time-bin indexing method from the
-% kNN_PCR code to select the appropriate Kalman filter (trained for a given
-% window length) based on the amount of data available. It then performs a KF
-% update using the measurement obtained from the test spike data.
+% Uses trained model parameters to:
+%   1. Preprocess incoming spike data (binning, sqrt, smoothing)
+%   2. Extract and reshape features from the current trial
+%   3. Classify intended movement direction using soft kNN
+%   4. Predict x and y hand position using regression coefficients
+%
+% Inputs:
+%   test_data        - A struct representing a single trial
+%   modelParameters  - Learned parameters from training
 %
 % Outputs:
-%   x, y            - Estimated hand position (in mm)
-%   modelParameters - Updated with current KF state and decoded trajectory.
+%   x, y             - Estimated hand position (in mm)
+%   modelParameters  - Updated with current predicted direction label
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    %% 1. Set parameters
-    bin_group = 20; % must match training
-    alpha = 0.3;
-    sigma = 50;
-    
-    start_idx  = modelParameters.start_idx; % e.g., 320 ms
-    stop_idx   = modelParameters.stop_idx;  % end of training window
-    directions = modelParameters.directions;
-    nWindows   = modelParameters.nWindows;  % number of KF models stored
-    
-    % Current time in test trial (ms)
-    curr_time = size(test_data.spikes, 2);
-    % Determine current number of complete bins in test data.
-    curr_bins = floor(curr_time / bin_group);
-    % Determine the window index as follows:
-    % We assume that training started at start_idx, which corresponds to bin index:
-    start_bin_idx = ceil(start_idx/bin_group);
-    % The window index (win_idx) is how many bins beyond start_idx we have:
-    win_idx = curr_bins - start_bin_idx + 1;
-    % Clip win_idx to be within [1, nWindows]
-    win_idx = min(max(win_idx, 1), nWindows);
-    
-    %% 2. Preprocess test data
-    preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
-    neuron_len = size(preprocessed_test(1,1).rate, 1);
-    
-    % Extract test neural data over the current window:
-    start_bin = start_bin_idx;
-    end_bin = start_bin_idx + win_idx - 1;
-    if size(preprocessed_test(1,1).rate,2) < end_bin
-        % Not enough bins; return last known state.
-        d = modelParameters.actualLabel;
-        x_update = modelParameters.kf(win_idx,d).state;
-        x = x_update(1);
-        y = x_update(2);
-        return;
+    %% Parameters
+    bin_group = 20; % Time bin width in ms
+    alpha = 0.3; % EMA smoothing factor
+    sigma = 50; % Std. deviation for Gaussian filter
+
+    start_idx = modelParameters.start_idx;
+    stop_idx = modelParameters.stop_idx;
+    directions = modelParameters.directions; % get the number of angles
+    polyDegree = modelParameters.polyd;
+
+    if ~isfield(modelParameters, 'actLabel')
+        modelParameters.actLabel = []; % Default label
     end
-    rate = preprocessed_test(1,1).rate(:, start_bin:end_bin);
-    % Remove low-firing neurons
-    rate(modelParameters.removeneurons, :) = [];
+
+    %% Soft kNN parameters
+    k = 20;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
+    pow = 1;   % Power factor for distance-based weighting
+    alp = 1e-6; % Scaling for exponential weighting
+
+   %% Preprocess the trial data
+   preprocessed_test = preprocessing(test_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
+   neuron_len = size(preprocessed_test(1,1).rate, 1);
+
+   %% Use indexing based on data given
+   curr_bin = size(test_data.spikes, 2);
+   idx = min( max( floor( ( curr_bin - start_idx ) / bin_group) + 1, 1), length(modelParameters.class));
+
+   %%  Remove low firing neurons for better accuracy
+   spikes_test = extract_features(preprocessed_test, neuron_len, curr_bin/bin_group, 'nodebug');
+   removed_neurons = modelParameters.removeneurons;
+   spikes_test(removed_neurons, :) = [];
+
+   %% Reshape dataset: Flatten spike data into column vector
+   spikes_test = reshape(spikes_test, [], 1);
+
+   %% Predict movement direction using kNN classification
+   if curr_bin <= stop_idx 
+       % Extract LDA projections and mean firing for the current bin
+       train_weight = modelParameters.class(idx).lda_weights;
+       test_weight =  modelParameters.class(idx).lda_outputs;
+       curr_firing_mean = modelParameters.class(idx).mean_firing;
+       
+       % Project test spike vector to LDA space
+       test_weight = test_weight' * (spikes_test(:) - curr_firing_mean(:));
+
+       % Classify using hard or soft kNN. Soft kNN can be distance (dist) or exponential (exp) based weighting
+       output_label = KNN_classifier(directions, test_weight, train_weight, k, pow, alp, 'soft', 'dist');
+
+   else 
+       % After max time window, retain previous classification
+       % output_label = mode(modelParameters.actLabel);
+       output_label = modelParameters.actualLabel;
+   end
+
+    % if modelParameters.trial_id == 0
+    % modelParameters.trial_id = test_data.trialId;
+    % else 
+    % if modelParameters.trial_id ~= test_data.trialId
+    %     modelParameters.iterations = 0;
+    %     modelParameters.trial_id = test_data.trialId;
+    %     modelParameters.actLabel = [];
+    % end
+    % end
+    % modelParameters.iterations = modelParameters.iterations + 1;
+    % 
+    % % disp(modelParameters.actualLabel)
+    % 
+    % %% Reset `actualLabel` if there are repeated inconsistencies
+    % if ~isempty(modelParameters.actLabel)
+    %     if modelParameters.actLabel(end) ~= output_label
+    %         if length(modelParameters.actLabel) > 10 && sum(modelParameters.actLabel(end-4:end) ~= output_label) >= 5
+    %             % If the last 5 classifications contain at least 3 mismatches, reset
+    %             modelParameters.actLabel = [];
+    %         end
+    %     end
+    % end
+    % 
+    % len_b_mode = 7;
+    % % Update the actual label in model parameters
+    % if ~isempty(modelParameters.actLabel)
+    % 
+    % % Accumulate stable labels before following the mode
+    % if length(modelParameters.actLabel) > len_b_mode  % Wait until there are at least 5 labels
+    %     output_label = mode(modelParameters.actLabel);
+    % end
+    % modelParameters.actLabel(end+1) = output_label;
+    % modelParameters.actLabel(:) = output_label;  % Ensure all entries are consistent
+    % else
+    %     % For the very first classification, just set the label
+    %     modelParameters.actLabel(end+1) = output_label;
+    % end 
+    % 
+    % output_label = modelParameters.actLabel(end);
+    % modelParameters.actualLabel = modelParameters.actLabel(end); 
+
+    modelParameters.actualLabel = output_label; 
     
-    % For KF measurement, we follow the same procedure as in training:
-    % Each test sample is the sequence in the current window.
-    % We form the measurement vector by flattening (column-wise).
-    test_spk_vec = reshape(rate, [], 1);
+   %% -----------  Kalman decoding  ----------------------------------------
+    % Which direction’s filter?
+    dir = output_label;
     
-    %% 3. Apply the measurement model (PCA) from the matching training window.
-    % For each direction d, we will compute the KF innovation and select the one
-    % with the lowest Mahalanobis distance.
-    best_d = 1;
-    best_d_score = Inf;
-    for d = 1:directions
-        % Retrieve PCA model for current window & direction.
-        pca_coeff = modelParameters.kf(win_idx,d).pca_coeff;
-        mean_spk  = modelParameters.kf(win_idx,d).mean_spk;
-        
-        % Center and project the test feature vector.
-        test_spk_centered = test_spk_vec - mean_spk;
-        z_test = pca_coeff' * test_spk_centered;  % measurement vector
-        
-        % Retrieve KF parameters for direction d.
-        A = modelParameters.kf(win_idx,d).A;
-        H = modelParameters.kf(win_idx,d).H;
-        Q = modelParameters.kf(win_idx,d).Q;
-        R = modelParameters.kf(win_idx,d).R;
-        x_prev = modelParameters.kf(win_idx,d).state;
-        P_prev = modelParameters.kf(win_idx,d).P;
-        
-        % Prediction step.
-        x_pred = A * x_prev;
-        P_pred = A * P_prev * A' + Q;
-        
-        % Innovation and covariance.
-        innov = z_test - H * x_pred;
-        S = H * P_pred * H' + R;
-        
-        % Compute Mahalanobis distance.
-        d_score = innov' / S * innov;
-        
-        if d_score < best_d_score
-            best_d_score = d_score;
-            best_d = d;
-        end
+    % Keep a persistent Kalman state per trial
+    if ~isfield(modelParameters,'KF') ...
+          || test_data.trialId ~= modelParameters.KF.trial_id
+        % --- first call of a new trial: initialise ---
+        modelParameters.KF.trial_id = test_data.trialId;
+        modelParameters.KF.x_hat    = modelParameters.kalman(dir).Pi;
+        modelParameters.KF.P        = modelParameters.kalman(dir).Vi;
     end
     
-    % Use the best direction's KF for update.
-    d = best_d;
-    A = modelParameters.kf(win_idx,d).A;
-    H = modelParameters.kf(win_idx,d).H;
-    Q = modelParameters.kf(win_idx,d).Q;
-    R = modelParameters.kf(win_idx,d).R;
-    x_prev = modelParameters.kf(win_idx,d).state;
-    P_prev = modelParameters.kf(win_idx,d).P;
+    Kpar = modelParameters.kalman(dir);          % shorthand
+    A = Kpar.A;  C = Kpar.C;  Q = Kpar.Q;  R = Kpar.R;
     
-    x_pred = A * x_prev;
-    P_pred = A * P_prev * A' + Q;
-    K = P_pred * H' / (H * P_pred * H' + R);
-    x_update = x_pred + K * (z_test - H * x_pred);
-    P_update = (eye(size(K,1)) - K * H) * P_pred;
+    % Build current observation vector z(k) exactly like during training
+    zk = spikes_test;   % already binned / EMA / neurons‑removed & vectorised
     
-    modelParameters.kf(win_idx,d).state = x_update;
-    modelParameters.kf(win_idx,d).P = P_update;
-    modelParameters.actualLabel = d;
+    % ---------- Predict step ----------------------------------------------
+    x_pred = A * modelParameters.KF.x_hat;
+    P_pred = A * modelParameters.KF.P * A' + Q;
     
-    %% 4. Output estimated position (x, y)
-    x = x_update(1);
-    y = x_update(2);
+    % ---------- Update step -----------------------------------------------
+    S   = C * P_pred * C' + R;                  % innovation covariance
+    K   = P_pred * C' / S;                      % Kalman gain  (pinv ok too)
+    x_upd = x_pred + K * (zk - C * x_pred);
+    P_upd = (eye(size(A)) - K*C) * P_pred;
     
-    if ~isfield(modelParameters, 'decodedHandPos') || isempty(modelParameters.decodedHandPos)
-        modelParameters.decodedHandPos = [x; y];
-    else
-        modelParameters.decodedHandPos(:, end+1) = [x; y];
-    end
+    % ----------  Save back & output position ------------------------------
+    modelParameters.KF.x_hat = x_upd;
+    modelParameters.KF.P     = P_upd;
+    
+    x = x_upd(1);
+    y = x_upd(2);
+
 end

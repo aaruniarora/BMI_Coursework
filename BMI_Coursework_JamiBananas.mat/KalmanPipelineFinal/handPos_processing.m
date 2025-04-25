@@ -1,3 +1,5 @@
+%% HELPER FUNCTION FOR PREPROCESSING OF HAND POSITIONS
+
 function [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, bins)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Pads and extracts hand position data aligned to spike bins

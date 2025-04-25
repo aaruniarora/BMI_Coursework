@@ -1,147 +1,187 @@
 function modelParameters = positionEstimatorTraining(training_data)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% POSITION ESTIMATOR TRAINING FUNCTION (KF Version with Time‐Window Indexing)
+% POSITION ESTIMATOR TRAINING FUNCTION
 %
-% This function trains a continuous position estimator using neural spikes.
-% It first pre-processes the data (binning, sqrt transform, smoothing), then
-% removes low‐firing neurons, and finally – for a series of time windows – it
-% extracts features, computes a PCA-based measurement model, and trains a
-% Kalman filter for each movement direction.
-%
-% The time-bin indexing is the same as in the provided kNN_PCR code: the
-% training window starts at start_idx and ends at stop_idx. For each time
-% window (of length win, in bins) a separate KF is trained and stored.
+% Trains a full decoding model to estimate hand positions from neural spikes.
+% Pipeline:
+%   1. Preprocesses neural data:
+%       - Pads all trials to max length
+%       - Bins spikes in 20 ms intervals
+%       - Applies smoothing filter (EMA or Gaussian)
+%   2. Removes neurons with low firing rate (< 0.5 spk/s)
+%   3. Extracts features and assigns direction labels
+%   4. Applies PCA for dimensionality reduction
+%   5. Applies LDA to find class-discriminative features
+%   6. Stores features and labels for later kNN decoding
+%   7. Trains a regression model (PCR - ridge and lasso optional) to map spikes to (x,y)
 %
 % Outputs:
-%   modelParameters - structure that contains:
-%      .start_idx, .stop_idx, .directions, .nWindows
-%      .removeneurons - indices of neurons excluded for low firing
-%      .kf(win, d) - for each time window (win=1:nWindows) and each direction d,
-%                     the following fields are stored:
-%                          A, H, Q, R, state, P,
-%                          pca_coeff (for measurement projection),
-%                          mean_spk (mean neural feature vector).
+%   modelParameters - struct storing all learned parameters:
+%       - preprocessing config
+%       - removed neurons
+%       - PCA/LDA matrices
+%       - regression coefficients
+%       - training data in discriminative space
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    %% 1. Set parameters
+
+    %% Parameters
     [training_length, directions] = size(training_data); 
-    bin_group = 20;         % bin width (ms)
-    alpha = 0.35;           % EMA smoothing constant
-    sigma = 50;             % Gaussian filter sigma (ms)
-    start_idx = 300 + bin_group;  % e.g. 320 ms
-    
-    % Determine the minimum trial length (in ms)
-    spike_cells = {training_data.spikes};
-    min_time_length = min(cellfun(@(sp) size(sp, 2), spike_cells));
+    bin_group = 20; % hypertuned 
+    alpha = 0.35; % hypertuned
+    sigma = 50;  % standard deviation in ms
+    start_idx = 300 + bin_group; 
+
+    % Find min time length
+    spike_cells = {training_data.spikes};  % Extract spike fields into a cell array
+    min_time_length = min(cellfun(@(sp) size(sp, 2), spike_cells(:))); 
     clear spike_cells;
     
-    % Define end of training window: from start_idx up to the largest multiple
-    % of bin_group available below min_time_length.
+    % Calculate stop_index based on bin_group
     stop_idx = floor((min_time_length - start_idx) / bin_group) * bin_group + start_idx;
-    % Define the discrete time bins used in training.
-    time_bins = start_idx:bin_group:stop_idx;
-    nWindows = length(time_bins);
-    
-    % Store basic parameters.
-    modelParameters.start_idx   = start_idx;
-    modelParameters.stop_idx    = stop_idx;
-    modelParameters.directions  = directions;
-    modelParameters.nWindows    = nWindows;
-    modelParameters.trial_id    = 0;
-    modelParameters.iterations  = 0;
+    time_bins = start_idx:bin_group:stop_idx;  % e.g. 320:20:560
+    num_bins = time_bins / bin_group; % eg. 13
 
-    %% 2. Preprocess neural data (binning, sqrt transform, smoothing)
+    % Store in modelParameters
+    modelParameters = struct;
+    modelParameters.start_idx = start_idx;
+    modelParameters.stop_idx  = stop_idx;
+    modelParameters.directions = directions;
+    modelParameters.trial_id = 0;
+    modelParameters.iterations = 0;
+
+    % ---------- Kalman containers (one set per reach direction) -------------
+    modelParameters.kalman = struct( ...
+            'A',  [],  ...  % state‑transition
+            'C',  [],  ...  % observation
+            'Q',  [],  ...  % process‑noise covariance
+            'R',  [],  ...  % observation‑noise covariance
+            'Pi', [],  ...  % mean initial state  (x,y,vx,vy)
+            'Vi', []);      % initial state covariance
+
+
+    %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smoothing
     preprocessed_data = preprocessing(training_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
     orig_neurons = size(preprocessed_data(1,1).rate, 1);
+
+    %% Remove data from neurons with low firing rates.
+    [spikes_mat, ~] = extract_features(preprocessed_data, orig_neurons, stop_idx/bin_group, 'nodebug');
+    removed_neurons = remove_neurons(spikes_mat, orig_neurons, 'nodebug');
+    neurons = orig_neurons - length(removed_neurons);
+    modelParameters.removeneurons = removed_neurons;
+    clear spikes_mat
+
+    %% Dimensionality parameters
+    pca_threshold = 0.44; % =40 for cov and =0.44 for svd
+    lda_dim = 6;
+ 
+    for curr_bin = 1: length(num_bins)
+        %% Extract features/restructure data for further analysis
+        [spikes_matrix, labels] = extract_features(preprocessed_data, orig_neurons, num_bins(curr_bin), 'nodebug');
+        
+        %% Remove data from neurons with low firing rates.
+        spikes_matrix(removed_neurons, : ) = [];
+
+        %% PCA for dimensionality reduction of the neural data
+        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
+
+        %% LDA to maximise class separability across different directions
+        [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
+
+        %% kNN training: store samples in LDA space with corresponding hand positions
+        modelParameters.class(curr_bin).PCA_dim = nPC;
+        modelParameters.class(curr_bin).LDA_dim = lda_dim;
+
+        modelParameters.class(curr_bin).lda_weights = weights;
+        modelParameters.class(curr_bin).lda_outputs= outputs;
     
-    % Determine low-firing neurons using the full window (for consistency).
-    full_bins = stop_idx / bin_group;  
-    [spikes_full, ~] = extract_features(preprocessed_data, orig_neurons, full_bins, 'nodebug');
-    removeneurons = remove_neurons(spikes_full, orig_neurons, 'nodebug');
-    modelParameters.removeneurons = removeneurons;
+        modelParameters.class(curr_bin).mean_firing = mean(spikes_matrix, 2);
+        modelParameters.class(curr_bin).labels = labels(:)';
+    end
+
+    %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
+    [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
     
-    %% 3. Train Kalman filter models indexed by time window
-    % For each time window win (i.e. using win bins starting at start_idx)
-    % we will accumulate training samples from each trial and direction.
-    for win = 1:nWindows
-        % Current window length in bins
-        curr_bins = win;
-        for d = 1:directions
-            X_cell = {};  % will store state sequences for trials
-            Z_cell = {};  % will store corresponding neural measurement sequences
-            for tr = 1:training_length
-                % Check if the trial is long enough
-                if size(training_data(tr,d).handPos,2) < (start_idx + (curr_bins-1)*bin_group)
-                    continue;
-                end
-                % Extract hand position from start_idx with spacing = bin_group, for curr_bins bins
-                pos = training_data(tr,d).handPos(1:2, start_idx:bin_group:(start_idx+(curr_bins-1)*bin_group));
-                if size(pos,2) < 2
-                    continue;
-                end
-                % Compute velocity (difference) and replicate last column
-                vel = diff(pos, 1, 2);
-                vel(:,end+1) = vel(:,end);
-                X_curr = [pos; vel];  % dimension: 4 x curr_bins
-                
-                % Extract neural data for this trial & direction:
-                % In preprocessed_data, each column is one bin.
-                start_bin_idx = ceil(start_idx/bin_group);
-                end_bin_idx = start_bin_idx + curr_bins - 1;
-                rate = preprocessed_data(tr,d).rate;
-                if size(rate,2) < end_bin_idx
-                    continue;
-                end
-                spk = rate(:, start_bin_idx:end_bin_idx);  % dimension: orig_neurons x curr_bins
-                % Remove low-firing neurons
-                spk(removeneurons, :) = [];
-                if size(spk,2) ~= size(X_curr,2)
-                    continue;
-                end
-                % For KF training we treat each time step in the window as one measurement.
-                % Store the entire sequence (each column is one time point).
-                X_cell{end+1} = X_curr;    % 4 x curr_bins
-                Z_cell{end+1} = spk;         % n_used x curr_bins
-            end
-            if isempty(X_cell) || isempty(Z_cell)
-                continue;
-            end
-            % Concatenate training samples from all trials along time axis.
-            % That is, assume each trial provides a sequence; we concatenate them
-            % so that columns correspond to sequential time steps from all trials.
-            X_all = cat(2, X_cell{:});        % 4 x (total_samples)
-            Z_all = cat(2, Z_cell{:});        % (n_used) x (total_samples)
-            
-            % Compute PCA on the neural measurements for this window.
-            [pca_coeff, ~, ~] = perform_PCA(Z_all, 0.44, 'nodebug');
-            mean_spk = mean(Z_all,2);
-            % Project measurements to obtain the observation sequence.
-            Z_proj = pca_coeff' * (Z_all - repmat(mean_spk,1,size(Z_all,2)));
-            
-            % For Kalman training, we use successive time steps.
-            if size(X_all,2) < 2, continue; end
-            X0 = X_all(:, 1:end-1);
-            X1 = X_all(:, 2:end);
-            Z0 = Z_proj(:, 2:end);  % associate each state X1 with measurement from same time
-            % Estimate state transition matrix A (4x4)
-            A = X1 * X0' / (X0 * X0');
-            % Estimate measurement matrix H (maps state X to observation z)
-            H = Z0 * X1' / (X1 * X1');
-            % Process noise covariance Q and measurement noise covariance R.
-            Q = cov((X1 - A*X0)');  % 4x4
-            R = cov((Z0 - H*X1)');
-            
-            % Store KF parameters for this time window and direction.
-            modelParameters.kf(win,d).A = A;
-            modelParameters.kf(win,d).H = H;
-            modelParameters.kf(win,d).Q = Q;
-            modelParameters.kf(win,d).R = R;
-            % Initialize KF state for each direction as zero state.
-            modelParameters.kf(win,d).state = zeros(4,1);
-            modelParameters.kf(win,d).P = eye(4);
-            % Also store measurement model parameters (for PCA projection).
-            modelParameters.kf(win,d).pca_coeff = pca_coeff;
-            modelParameters.kf(win,d).mean_spk = mean_spk;
-        end % for d
-    end % for win
+    %% PCR
+    poly_degree = 1;
+    modelParameters.polyd = poly_degree;
+    reg_meth = 'standard';
+    modelParameters.reg_meth = reg_meth;
+
+    time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
+    time_interval = start_idx:bin_group:stop_idx;
+
+    % modelling hand positions separately for each direction
+    % CONSTANTS --------------------------------------------------------------
+    dt = bin_group/1000;                 % 20 ms  → 0.02 s
+    A_nominal = [1 0 dt 0; 0 1 0 dt;    % constant‑velocity model
+                 0 0 1  0; 0 0 0  1];
+    
+    for dir_idx = 1:directions
+        % ----------  Assemble per‑direction training matrices  --------------
+        %  z(k)  = (binned EMA‑smoothed firing at time‑bin k)  [F x 1]
+        %  x(k)  = [x; y; vx; vy]                              [4 x 1]
+    
+        Xk   = [];           % state at bin k      (4 × N)
+        Xk1  = [];           % state at bin k+1
+        Zk   = [];           % observation at k    (F × N)
+    
+        for tr = 1:training_length
+            % extract hand position trajectory for this trial & direction
+            pos = formatted_xPos(tr,:,dir_idx);   % x‑positions at all bins
+            pos = [pos; formatted_yPos(tr,:,dir_idx)];        % 2×T
+            vel = diff([pos(:,1) pos],1,2)/dt;                % finite diff
+            vel(:,end) = vel(:,end-1);                        % same length
+    
+            X   = [pos ; vel];                                % 4×T
+            Xk  = [Xk  X(:,1:end-1)];
+            Xk1 = [Xk1 X(:,2:end)];
+    
+            % build observation matrix – **exactly the features already
+            % computed for soft‑kNN** so nothing elsewhere changes
+            bin_cnt = extract_features(preprocessed_data(tr,dir_idx), ...
+                                       orig_neurons, size(X,2), 'nodebug');
+            % bin_cnt(removed_neurons,:) = [];                  % keep neurons
+            % Zk  = [Zk  reshape(bin_cnt, size(bin_cnt,1), [])];
+            % For this trial, take binned firing rates
+            rates = preprocessed_data(tr,dir_idx).rate;       % neurons × numBins
+            rates(removed_neurons,:) = [];                     % drop low‐firing neurons
+            rates = rates(:, num_bins);                   % F×T
+            Zk = [Zk rates(:,1:end-1)];                       % align to Xk(:,1:end-1)
+        end
+    
+        % ----------  Least‑squares estimation of Kalman matrices ------------
+        % State transition A
+        A = Xk1 * pinv(Xk);                                   % (4×4)
+        % Force A to stay close to constant‑velocity model to prevent
+        % pathological fits                       (optional but robust)
+        lambda_A = 0.02;      % small ridge
+        A = (1-lambda_A)*A + lambda_A*A_nominal;
+    
+        % Observation matrix C
+        size(Zk), size(Xk)
+        % C = Zk  .* pinv(Xk);                                   % (F×4)
+        C = (Zk * Xk') / (Xk * Xk' + 1e-6*eye(4));
+    
+        % Noise covariances
+        W = Xk1 - A*Xk;
+        V = Zk  - C*Xk;
+        Q = cov(W');                                          % (4×4)
+        R = cov(V');                                          % (F×F)
+        % small diagonal boost for numerical stability
+        epsQ = 1e-4*eye(4);     Q = Q + epsQ;
+        epsR = 1e-3*eye(size(R,1)); R = R + epsR;
+    
+        % Initial state mean/covariance
+        Pi = mean(X(:,1:3),2);             % average of first three bins
+        Vi = diag(var(X(:,1:3),0,2)+1);    % diagonal, inflated by +1
+    
+        % ----------  Store ---------------------------------------------------
+        modelParameters.kalman(dir_idx).A  = A;
+        modelParameters.kalman(dir_idx).C  = C;
+        modelParameters.kalman(dir_idx).Q  = Q;
+        modelParameters.kalman(dir_idx).R  = R;
+        modelParameters.kalman(dir_idx).Pi = Pi;
+        modelParameters.kalman(dir_idx).Vi = Vi;
+    end
 end
