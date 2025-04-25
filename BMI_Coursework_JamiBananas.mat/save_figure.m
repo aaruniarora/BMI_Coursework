@@ -1,12 +1,14 @@
-function save_figure(figHandle, outFolder, name, format, type)
+function save_figure(figHandle, outFolder, name, format, type, replace_fig)
 
-    if nargin<5
-        type='vector';
+    if nargin < 5 || isempty(type)
+        type = 'vector'; %'image'
+    end
+    if nargin < 6
+        replace_fig = false; % Default: do not replace the exisitng figure
     end
 
     to_day = char(datetime('today', 'Format', 'ddMMMMyyyy'));
 
-    % if you want to save in the same folder, put '.'
     % Get absolute folder path (relative to this script or current dir)
     outFolderFull = fullfile(pwd, outFolder);
 
@@ -15,9 +17,24 @@ function save_figure(figHandle, outFolder, name, format, type)
         mkdir(outFolderFull);
     end
 
-    % Build full file path
-    filepath = fullfile(outFolderFull, [name '_' to_day '.' format]);
+    % Base filename without extension
+    baseFileName = [name '_' to_day];
+    filepath = fullfile(outFolderFull, [baseFileName '.' format]);
 
+    % Check if file exists and handle versioning if replaceFlag is false
+    if exist(filepath, 'file') && ~replace_fig
+        counter = 1;
+        while true
+            newFileName = sprintf('%s(%d).%s', baseFileName, counter, format);
+            filepath = fullfile(outFolderFull, newFileName);
+            if ~exist(filepath, 'file')
+                break;
+            end
+            counter = counter + 1;
+        end
+    end
+
+    % Save figure
     if format == "png"
         exportgraphics(figHandle, filepath, 'Resolution', 600);
     elseif any(format == ["pdf", "eps"])
