@@ -74,11 +74,14 @@ rmpath(genpath(teamName))
 
 end
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
 disp(['Making sure mean RMSE here is the same as their formula: ' num2str(mean(meanRMSE_perBin))]);
 disp(['Overall classification accuracy: ' num2str(mean(accuracy_perBin)*100)])
 
 if ~isempty(figname), save_figure(gcf, 'figures', figname, 'pdf', 'vector', false); end
 end
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
