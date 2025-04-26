@@ -11,8 +11,8 @@ function modelParameters = positionEstimatorTraining(training_data)
 %   2. Removes neurons with low firing rate (< 0.5 spk/s)
 %   3. Extracts features and assigns direction labels
 %   4. Applies PCA for dimensionality reduction
-%   5. Applies LDA to find class-discriminative features
-%   6. Stores features and labels for later kNN decoding
+%   5. Applies LDA/SVM to find class-discriminative features
+%   6. Stores features and labels for later decoding
 %   7. Trains a regression model (PCR - ridge and lasso optional) to map spikes to (x,y)
 %
 % Outputs:
@@ -49,7 +49,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     modelParameters.directions = directions;
     modelParameters.trial_id = 0;
     modelParameters.iterations = 0;
-    class_meth = 'forest';
+    class_meth = 'svm'; % lda or svm as classification method
     modelParameters.class_meth = class_meth;
 
     %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smoothing
@@ -76,14 +76,14 @@ function modelParameters = positionEstimatorTraining(training_data)
 
         %% PCA for dimensionality reduction of the neural data
         [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
-        normalized_spikes = (spikes_matrix - min(spikes_matrix)) ./ (max(spikes_matrix) - min(spikes_matrix));
-        num_trees = 10;
-        if strcmp(class_meth, 'forest')
+        if strcmp(class_meth, 'svm')
             angle_labels = repelem((1:8)', size(spikes_matrix, 2)/8);
-            modelParameters.class(curr_bin).num_features = size(spikes_matrix,1);
-            result = trainRandomForest(normalized_spikes,angle_labels, num_trees);
+            template = templateSVM('KernelFunction','rbf','KernelScale','auto');
+            SVMModel = fitcecoc(spikes_matrix', angle_labels,'Learners', template);  
+            modelParameters.class(curr_bin).svm = SVMModel;
+            [nRows_train, nCols_train] = size(spikes_matrix);
+            modelParameters.class(curr_bin).svm_feature = nRows_train;
 
-        modelParameters.class(curr_bin).rf_angle = result;
         elseif strcmp(class_meth, 'lda')
         %% LDA to maximise class separability across different directions
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
@@ -140,42 +140,6 @@ function modelParameters = positionEstimatorTraining(training_data)
 end
 
 %% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
-function tree = trainDecisionTree(X, Y, depth, max_depth, min_samples_split, min_samples_leaf)
-    tree = struct;
-    if depth >= max_depth || size(X, 1) < min_samples_split || numel(unique(Y)) == 1
-        tree.value = mean(Y(:));
-        return;
-    end
-
-    tree.split_feature = randi(size(X, 2));
-    tree.split_value = median(X(:, tree.split_feature));
-
-    left_idx = X(:, tree.split_feature) <= tree.split_value;
-    right_idx = ~left_idx;
-
-    if sum(left_idx) >= min_samples_leaf && sum(right_idx) >= min_samples_leaf
-        tree.left = trainDecisionTree(X(left_idx, :), Y(left_idx), depth + 1, max_depth, min_samples_split, min_samples_leaf);
-        tree.right = trainDecisionTree(X(right_idx, :), Y(right_idx), depth + 1, max_depth, min_samples_split, min_samples_leaf);
-    else
-        tree.value = mean(Y(:));
-    end
-end
-
-function forest = trainRandomForest(X, Y, num_trees)
-    forest = struct;
-    max_depth = 5;
-    min_samples_split = 20;
-    min_samples_leaf = 1;
-
-   num_samples = size(X, 2);  % number of trials/samples
-
-    for i = 1:num_trees
-        idx = randi(num_samples, num_samples, 1);  % Bootstrap indices
-        X_sample = X(:, idx);                      % sample columns (features × trials)
-        Y_sample = Y(idx, :);                      % sample corresponding labels
-        forest(i).tree = trainDecisionTree(X_sample', Y_sample, 0, max_depth, min_samples_split, min_samples_leaf);
-    end
-end
 
 function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -208,7 +172,7 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
     max_time_length = max(cellfun(@(sc) size(sc, 2), spike_cells));
     clear spike_cells;
 
-    % Fill NaNs with 0's and pad each trial’s spikes out to max_time_length
+    % Fill NaNs with 0's and pad each trial's spikes out to max_time_length
     for tl = 1:rows
         for dir = 1:cols
             curr_spikes = training_data(tl, dir).spikes; 

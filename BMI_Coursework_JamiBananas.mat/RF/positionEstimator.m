@@ -5,7 +5,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 % Uses trained model parameters to:
 %   1. Preprocess incoming spike data (binning, sqrt, smoothing)
 %   2. Extract and reshape features from the current trial
-%   3. Classify intended movement direction using soft kNN
+%   3. Classify intended movement direction using kNN/NN/SVM
 %   4. Predict x and y hand position using regression coefficients
 %
 % Inputs:
@@ -26,7 +26,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     stop_idx = modelParameters.stop_idx;
     directions = modelParameters.directions; % get the number of angles
     polyDegree = modelParameters.polyd;
-    class_meth = modelParameters.class_meth;
+    class_meth = modelParameters.class_meth; %classification method
 
     if ~isfield(modelParameters, 'actLabel')
         modelParameters.actLabel = []; % Default label
@@ -57,19 +57,12 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
    if curr_bin <= stop_idx 
        curr_firing_mean = modelParameters.class(idx).mean_firing;
 
-       if strcmp(class_meth, 'forest')
-           curr_bin = min(curr_bin, length(modelParameters.class));
-           X_new = curr_firing_mean(:)';  % Ensure it's a row vector
-            curr_len = length(X_new);
-            expected_length = modelParameters.class(curr_bin).num_features;
+       if strcmp(class_meth, 'svm')
+           SVMModel = modelParameters.class(idx).svm;
 
-            if curr_len < expected_length
-                X_new = [X_new, zeros(1, expected_length - curr_len)];
-            elseif curr_len > expected_length
-                X_new = X_new(1:expected_length);  % Truncate if it's too long
-            end
-           normalized_spikes = (X_new - min(X_new)) ./ (max(X_new) - min(X_new));
-           output_label = predictRandomForest(modelParameters.class(curr_bin).rf_angle,normalized_spikes);
+       predicted_angles = predict(SVMModel, spikes_test');
+       output_label = predicted_angles(end);
+
        elseif strcmp(class_meth, 'lda')
         
        % Extract LDA projections and mean firing for the current bin
@@ -146,35 +139,6 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 end
 
 %% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
-function y_pred = predictDecisionTree(tree, X)
-    % Predict using the manually trained decision tree
-    y_pred = zeros(size(X, 1), 1);
-
-    for i = 1:size(X, 1)
-        node = tree;
-        while isfield(node, 'left') && isfield(node, 'right')
-            if X(i, node.split_feature) <= node.split_value
-                node = node.left;
-            else
-                node = node.right;
-            end
-        end
-        y_pred(i) = node.value;
-    end
-end
-
-function y_pred = predictRandomForest(forest, X_new)
-    % Predict using the Random Forest (average tree predictions)
-    num_trees = length(forest);
-    predictions = zeros(num_trees, size(X_new, 1));
-
-    for i = 1:num_trees
-        predictions(i, :) = predictDecisionTree(forest(i).tree, X_new);
-    end
-
-    y_pred = mean(predictions, 1); % Average predictions
-end
-
 function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing function for spike trains
@@ -206,7 +170,7 @@ function preprocessed_data = preprocessing(training_data, bin_group, filter_type
     max_time_length = max(cellfun(@(sc) size(sc, 2), spike_cells));
     clear spike_cells;
 
-    % Fill NaNs with 0's and pad each trial’s spikes out to max_time_length
+    % Fill NaNs with 0's and pad each trial's spikes out to max_time_length
     for tl = 1:rows
         for dir = 1:cols
             curr_spikes = training_data(tl, dir).spikes; 

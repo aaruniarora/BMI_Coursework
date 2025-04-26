@@ -149,6 +149,6 @@ for i = 1:nBins
 end
 
 disp(['Making sure mean RMSE here is the same as their formula: ' mean(meanRMSE_perBin)]);
-
+disp(['Overall classification accuracy: ' mean(accuracy_perBin)])
 % save_figure(gcf, 'figures', figname, format);
 end
