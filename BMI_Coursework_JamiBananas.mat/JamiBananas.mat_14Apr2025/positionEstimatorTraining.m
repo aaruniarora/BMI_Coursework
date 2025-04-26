@@ -73,7 +73,7 @@ function modelParameters = positionEstimatorTraining(training_data)
         spikes_matrix(removed_neurons, : ) = [];
 
         %% PCA for dimensionality reduction of the neural data
-        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
+        [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug', orig_neurons, removed_neurons);
 
         %% LDA to maximise class separability across different directions
         [outputs, weights] = perform_LDA(spikes_matrix, score, labels, lda_dim, training_length, 'nodebug');
@@ -376,7 +376,7 @@ end
 
 %% HELPER FUNCTION FOR DIMENSIONALITY REDUCTION
 
-function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
+function [coeff, score, nPC] = perform_PCA(data, threshold, debug, orig_neurons, removed_neurons)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Performs Principal Component Analysis (PCA)
 %
@@ -405,7 +405,20 @@ function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
     coeff = V(:, 1:nPC);
 
     if strcmp(debug, 'debug')
-        figure; plot(score);
+        % figure; plot(score);
+        
+        kept_neurons = setdiff(1:orig_neurons, removed_neurons);
+        F = numel(kept_neurons);           % #kept neurons
+        for pc = 1:nPC
+            [~, sorted] = sort(abs(coeff(:,pc)), 'descend');
+            topRows    = sorted(1:end);      % Take more (like 20) to ensure after unique we have enough
+            topNeuronIdx = mod(topRows-1,F)+1;  % This maps row to neuron (fixes bin offset)
+            topNeuronIDs = kept_neurons(topNeuronIdx);
+            topNeuronIDs = unique(topNeuronIDs, 'stable'); % keep only unique neurons
+            top5 = topNeuronIDs(1:min(orig_neurons-removed_neurons,length(topNeuronIDs))); % take top 5 if possible
+            fprintf('PC %d: top 95 unique neurons = %s\n', pc, mat2str(top5));
+        end
+
     end
 end
 

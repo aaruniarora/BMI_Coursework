@@ -50,16 +50,6 @@ function modelParameters = positionEstimatorTraining(training_data)
     modelParameters.trial_id = 0;
     modelParameters.iterations = 0;
 
-    % ---------- Kalman containers (one set per reach direction) -------------
-    modelParameters.kalman = struct( ...
-            'A',  [],  ...  % state‑transition
-            'C',  [],  ...  % observation
-            'Q',  [],  ...  % process‑noise covariance
-            'R',  [],  ...  % observation‑noise covariance
-            'Pi', [],  ...  % mean initial state  (x,y,vx,vy)
-            'Vi', []);      % initial state covariance
-
-
     %% Spikes Preprocessing: Binning (20ms), Sqrt Transformation, EMA Smoothing
     preprocessed_data = preprocessing(training_data, bin_group, 'EMA', alpha, sigma, 'nodebug');
     orig_neurons = size(preprocessed_data(1,1).rate, 1);
@@ -101,87 +91,129 @@ function modelParameters = positionEstimatorTraining(training_data)
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
     [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
-    
-    %% PCR
-    poly_degree = 1;
-    modelParameters.polyd = poly_degree;
-    reg_meth = 'standard';
-    modelParameters.reg_meth = reg_meth;
 
-    time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
-    time_interval = start_idx:bin_group:stop_idx;
-
-    % modelling hand positions separately for each direction
-    % CONSTANTS --------------------------------------------------------------
-    dt = bin_group/1000;                 % 20 ms  → 0.02 s
-    A_nominal = [1 0 dt 0; 0 1 0 dt;    % constant‑velocity model
-                 0 0 1  0; 0 0 0  1];
-    
+    %% Kalman
     for dir_idx = 1:directions
-        % ----------  Assemble per‑direction training matrices  --------------
-        %  z(k)  = (binned EMA‑smoothed firing at time‑bin k)  [F x 1]
-        %  x(k)  = [x; y; vx; vy]                              [4 x 1]
-    
-        Xk   = [];           % state at bin k      (4 × N)
-        Xk1  = [];           % state at bin k+1
-        Zk   = [];           % observation at k    (F × N)
-    
+
         for tr = 1:training_length
-            % extract hand position trajectory for this trial & direction
-            pos = formatted_xPos(tr,:,dir_idx);   % x‑positions at all bins
-            pos = [pos; formatted_yPos(tr,:,dir_idx)];        % 2×T
-            vel = diff([pos(:,1) pos],1,2)/dt;                % finite diff
-            vel(:,end) = vel(:,end-1);                        % same length
-    
-            X   = [pos ; vel];                                % 4×T
-            Xk  = [Xk  X(:,1:end-1)];
-            Xk1 = [Xk1 X(:,2:end)];
-    
-            % build observation matrix – **exactly the features already
-            % computed for soft‑kNN** so nothing elsewhere changes
-            bin_cnt = extract_features(preprocessed_data(tr,dir_idx), ...
-                                       orig_neurons, size(X,2), 'nodebug');
-            % bin_cnt(removed_neurons,:) = [];                  % keep neurons
-            % Zk  = [Zk  reshape(bin_cnt, size(bin_cnt,1), [])];
-            % For this trial, take binned firing rates
-            rates = preprocessed_data(tr,dir_idx).rate;       % neurons × numBins
-            rates(removed_neurons,:) = [];                     % drop low‐firing neurons
-            rates = rates(:, num_bins);                   % F×T
-            Zk = [Zk rates(:,1:end-1)];                       % align to Xk(:,1:end-1)
+
+            [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data(tr,dir_idx), neurons);
+            Parameters.A{tr}=A;
+            Parameters.H{tr}=H;
+            Parameters.Q{tr}=Q;
+            Parameters.W{tr}=W;
+
         end
     
-        % ----------  Least‑squares estimation of Kalman matrices ------------
-        % State transition A
-        A = Xk1 * pinv(Xk);                                   % (4×4)
-        % Force A to stay close to constant‑velocity model to prevent
-        % pathological fits                       (optional but robust)
-        lambda_A = 0.02;      % small ridge
-        A = (1-lambda_A)*A + lambda_A*A_nominal;
-    
-        % Observation matrix C
-        size(Zk), size(Xk)
-        % C = Zk  .* pinv(Xk);                                   % (F×4)
-        C = (Zk * Xk') / (Xk * Xk' + 1e-6*eye(4));
-    
-        % Noise covariances
-        W = Xk1 - A*Xk;
-        V = Zk  - C*Xk;
-        Q = cov(W');                                          % (4×4)
-        R = cov(V');                                          % (F×F)
-        % small diagonal boost for numerical stability
-        epsQ = 1e-4*eye(4);     Q = Q + epsQ;
-        epsR = 1e-3*eye(size(R,1)); R = R + epsR;
-    
-        % Initial state mean/covariance
-        Pi = mean(X(:,1:3),2);             % average of first three bins
-        Vi = diag(var(X(:,1:3),0,2)+1);    % diagonal, inflated by +1
-    
-        % ----------  Store ---------------------------------------------------
-        modelParameters.kalman(dir_idx).A  = A;
-        modelParameters.kalman(dir_idx).C  = C;
-        modelParameters.kalman(dir_idx).Q  = Q;
-        modelParameters.kalman(dir_idx).R  = R;
-        modelParameters.kalman(dir_idx).Pi = Pi;
-        modelParameters.kalman(dir_idx).Vi = Vi;
+        % average over trials to obtain a final set of parameters 
+        % (A_(dir), H_(dir), Q_(dir), W_(dir)) for each direction
+        modelParameters.A{dir_idx}=sum(cat(3,Parameters.A{:}),3)./training_length; 
+        modelParameters.H{dir_idx}=sum(cat(3,Parameters.H{:}),3)./training_length; 
+        modelParameters.W{dir_idx}=sum(cat(3,Parameters.W{:}),3)./training_length; 
+        modelParameters.Q{dir_idx}=sum(cat(3,Parameters.Q{:}),3)./training_length; 
+
     end
+    
+    %% PCR
+    % poly_degree = 1;
+    % modelParameters.polyd = poly_degree;
+    % reg_meth = 'standard';
+    % modelParameters.reg_meth = reg_meth;
+    % 
+    % time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
+    % time_interval = start_idx:bin_group:stop_idx;
+    % 
+    % % modelling hand positions separately for each direction
+    % for dir_idx = 1:directions
+    % 
+    %     % Extract the current direction's hand position data for all trials
+    %     curr_X_pos = formatted_xPos(:,:,dir_idx);
+    %     curr_Y_pos = formatted_yPos(:,:,dir_idx);
+    % 
+    %     % Loop through each time window to calculate regression coefficients that predict hand positions from neural data
+    %     for win_idx = 1:((stop_idx-start_idx)/bin_group)+1
+    % 
+    %         % Calculate regression coefficients and the windowed firing rates for the current time window and direction
+    %         [reg_coeff_X, reg_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, ...
+    %             dir_idx, spikes_matrix, pca_threshold, time_interval, curr_X_pos, curr_Y_pos,poly_degree, reg_meth);
+    %         % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
+    % 
+    %         % Store in model parameters
+    %         modelParameters.pcr(dir_idx,win_idx).bx = reg_coeff_X;
+    %         modelParameters.pcr(dir_idx,win_idx).by = reg_coeff_Y;
+    %         modelParameters.pcr(dir_idx,win_idx).f_mean = mean(win_firing,2);
+    % 
+    %         % And store the mean hand positions across all trials for each time window   
+    %         modelParameters.averages(win_idx).av_X = squeeze(mean(xPos,1));
+    %         modelParameters.averages(win_idx).av_Y = squeeze(mean(yPos,1));
+    % 
+    %     end
+    % end    
+end
+
+%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
+
+function [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data, selected_neurons, ...
+    lag, num_bins, start_idx)
+% Function for 'one trial' parameters estimation (A_(tr, dir), H_(tr, dir), 
+% Q_(tr, dir), W_(tr, dir)) for a given angle
+
+    % CONSTANTS
+    nb_states = 4; % X Y Vx Vy 
+    % NB: testing phase revealed that the inclusion of acceleration components in the state vector did not improved the performance of the decoder. 
+    % Therefore, acceleration was excluded (only 4 states are used).
+
+    % Build observation matrix z
+    for nr = 1:length(selected_neurons)
+        neuron = selected_neurons(nr);
+        spike = training_data.spikes(neuron, start_idx+1:(start_idx+num_bins*lag));
+        spike = reshape(spike, lag, num_bins);
+        spike_count = sum(spike, 1);
+        z(nr, :) = spike_count / lag;
+    end
+
+
+    % Build state matrix x over time bins
+    x = zeros(nb_states,num_bins); % State Matrix 
+
+    % Compute position every t=320+k*20ms 
+    % x(1,:)=[X(320+20ms), X(320+40ms), ...., X(320+nb_bins*20ms)]
+    % x(2,:)= [Y(320+20ms), Y(320+40ms), ...., Y(320+nb_bins*20ms)]
+
+    for k = 1:num_bins
+        x(1,k) = training_data.handPos(1,start_idx+k*lag); % X
+        x(2,k) = training_data.handPos(2,start_idx+k*lag); % Y
+    end
+
+    Pos_0 = training_data.handPos(1:2,start_idx); %(x0, y0) store initial position at t=320 ms
+
+    % Compute velocity every t=320+k*20ms 
+    % Vx(1,:)=(1/20)*[X(320+20ms)-X(320ms), X(320+40ms)-X(320+20ms), ...., X(320+nb_bins*20ms)-X(320+(nb_bins-1)*20ms)]
+    % Vy(2,:)= (1/20)*[Y(320+20ms)-Y(320ms), Y(320+40ms)-Y(320+20ms), ...., Y(320+nb_bins*20ms)-Y(320+(nb_bins-1)*20ms)]
+    for k = 1:num_bins
+        if k==1
+            x(3,k) = (x(1,k)-Pos_0(1))/lag;
+            x(4,k) = (x(2,k)-Pos_0(2))/lag;
+        else
+            x(3,k) = (x(1,k)-x(1,k-1))/lag;
+            x(4,k) = (x(2,k)-x(2,k-1))/lag;
+        end
+    end
+
+    % Parameters Estimations 
+    % Reference: W. Wu, M. Black, Y. Gao, E. Bienenstock, M. Serruya, and J. Donoghue, "Inferring hand motion from multi-cell recordings in motor cortex 
+    % using a kalman filter," (2002)
+
+    % Useful Matrices  
+    X1 = x(:,1:(end-1));
+    X2 = x(:,2:end);
+
+    % Compute A, H, W and Q
+    A = X2*X1' / (X1*X1');
+    W = X2*X2' - A*X1*X2';
+    W = W / (num_bins-1);
+    H = z*x' / (x*x');
+    Q = (z*z' - H*x*z');
+    Q = Q / (num_bins);
+
 end
