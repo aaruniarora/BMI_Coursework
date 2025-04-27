@@ -1,1 +1,0 @@
-{"_timestamp":1.742117987762452e+09,"_wandb":{"runtime":1},"_step":0,"elapsedTime":19.46,"pow":1,"lda":6,"RMSE":6.8414,"alpha":0.35,"k":25,"mean_acc":99.88,"alpha_est":0.3,"_runtime":1.2510624,"pca_thres":0.4,"len_b":8}
