@@ -10,4 +10,4 @@ This project involves designing a causal neural decoder to estimate a monkey's 2
 - Scoring: RMSE (Root Mean Squared Error) in cm
 
 ### Acknowledgements
-Special thanks to Prof. Krishna Shenoy's Laboratory for the neural data and to the BMI 2025 course organised by Dr Claudia Clopath and the GTAs for organising this competition.
+Special thanks to Prof. Krishna Shenoy's Laboratory for the neural data and to the BMI 2025 course and competition organised by Dr Claudia Clopath and the GTAs.
