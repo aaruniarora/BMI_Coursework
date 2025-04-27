@@ -411,12 +411,12 @@ function [coeff, score, nPC] = perform_PCA(data, threshold, debug, orig_neurons,
         F = numel(kept_neurons);           % #kept neurons
         for pc = 1:nPC
             [~, sorted] = sort(abs(coeff(:,pc)), 'descend');
-            topRows    = sorted(1:end);      % Take more (like 20) to ensure after unique we have enough
+            topRows    = sorted(1:5);      % Take more (like 20) to ensure after unique we have enough
             topNeuronIdx = mod(topRows-1,F)+1;  % This maps row to neuron (fixes bin offset)
             topNeuronIDs = kept_neurons(topNeuronIdx);
             topNeuronIDs = unique(topNeuronIDs, 'stable'); % keep only unique neurons
-            top5 = topNeuronIDs(1:min(orig_neurons-removed_neurons,length(topNeuronIDs))); % take top 5 if possible
-            fprintf('PC %d: top 95 unique neurons = %s\n', pc, mat2str(top5));
+            top5 = topNeuronIDs(1:min(5,length(topNeuronIDs))); % take top 5 if possible
+            fprintf('PC%d=%s\n', pc, mat2str(top5));
         end
 
     end
