@@ -18,12 +18,12 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     %% Parameters
-    bin_group = 20; % Time bin width in ms
     alpha = 0.3; % EMA smoothing factor
     sigma = 50; % Std. deviation for Gaussian filter
 
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
+    bin_group = modelParameters.bin_group;
     directions = modelParameters.directions; % get the number of angles
     polyDegree = modelParameters.polyd;
 

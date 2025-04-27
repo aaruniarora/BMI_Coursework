@@ -27,7 +27,7 @@ function modelParameters = positionEstimatorTraining(training_data)
 
     %% Parameters
     [training_length, directions] = size(training_data); 
-    bin_group = 20; % hypertuned 
+    bin_group = 20; % Time bin width in ms
     alpha = 0.35; % hypertuned
     sigma = 50;  % standard deviation in ms
     start_idx = 300 + bin_group; 
@@ -46,6 +46,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     modelParameters = struct;
     modelParameters.start_idx = start_idx;
     modelParameters.stop_idx  = stop_idx;
+    modelParameters.bin_group = bin_group;
     modelParameters.directions = directions;
     modelParameters.trial_id = 0;
     modelParameters.iterations = 0;
