@@ -78,7 +78,7 @@ function modelParameters = positionEstimatorTraining(training_data)
         [~, score, nPC] = perform_PCA(spikes_matrix, pca_threshold, 'nodebug');
         if strcmp(class_meth, 'svm')
             angle_labels = repelem((1:8)', size(spikes_matrix, 2)/8);
-            template = templateSVM('KernelFunction','rbf','KernelScale','auto');
+            template = templateSVM('KernelFunction','linear','KernelScale','auto');
             SVMModel = fitcecoc(spikes_matrix', angle_labels,'Learners', template);  
             modelParameters.class(curr_bin).svm = SVMModel;
             [nRows_train, nCols_train] = size(spikes_matrix);
