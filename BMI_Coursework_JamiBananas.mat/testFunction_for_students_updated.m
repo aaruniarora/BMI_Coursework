@@ -39,10 +39,10 @@ fprintf('Testing the continuous position estimator...')
 meanSqError = 0;
 n_predictions = 0;  
 
-% Classification Accuracy
-% correctCount   = 0;  % how many times we guessed the right direction
-% totalCount     = 0;  % how many direction predictions we made
-% predictedLabel = zeros(size(testData,1), 8); 
+%Classification Accuracy
+correctCount   = 0;  % how many times we guessed the right direction
+totalCount     = 0;  % how many direction predictions we made
+predictedLabel = zeros(size(testData,1), 8); 
 
 % Initialize storage for per-bin statistics
 timeBins = 320:20:560;  % same as 'times'
@@ -109,6 +109,11 @@ for tr=1:size(testData,1)
         % Classification code
         predictedDir = modelParameters.actualLabel;  % The label your code just assigned
         predictedLabel(tr, direc) = predictedDir;
+        % Compare predictedDir to the true direction (= direc)
+        if predictedDir == direc
+            correctCount = correctCount + 1;
+        end
+        totalCount = totalCount + 1;
         % -----END----- %
     end
 end
@@ -116,6 +121,8 @@ end
 legend('Decoded Position', 'Actual Position')
 
 RMSE = sqrt(meanSqError/n_predictions); 
+
+classificationAccuracy = correctCount / totalCount;
 
 % End timing and store the result
 elapsedTime = toc;  
@@ -126,6 +133,7 @@ rmpath(genpath(teamName))
 fprintf('\nExecution time: %.2f seconds\n', elapsedTime);
 fprintf('RMSE: %.4f\n', RMSE);
 fprintf('Weighted Rank: %.2f\n', 0.9*RMSE + 0.1*elapsedTime);
+fprintf('Classification Accuracy (final) = %.2f%% \n', classificationAccuracy * 100);
 
 % Final stats per time bin
 meanRMSE_perBin = sqrt(squaredErrorPerBin ./ countPerBin);

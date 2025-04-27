@@ -29,6 +29,7 @@ function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName
     RMSEs = zeros(1, k);
     RMSE_bin = zeros(1, k);
     accuracies = zeros(1, k);
+    accuracies_bin = zeros(1, k);
 
     % Create k-folds
     foldSize = floor(length(trial) / k);
@@ -51,8 +52,8 @@ function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName
         % Initialize error metrics
         meanSqError = 0;
         n_predictions = 0;
-        % correctCount = 0;
-        % totalCount = 0;
+        correctCount = 0;
+        totalCount = 0;
 
         % Initialize storage for per-bin statistics
         timeBins = 320:20:560;  % same as 'times'
@@ -102,6 +103,16 @@ function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName
                     end
     
                     n_predictions = n_predictions + length(times);
+
+                    % Classification code
+                    predictedDir = modelParameters.actualLabel;  % The label your code just assigned
+                    predictedLabel(tr, direc) = predictedDir;
+                    % Compare predictedDir to the true direction (= direc)
+                    if predictedDir == direc
+                        correctCount = correctCount + 1;
+                    end
+                    totalCount = totalCount + 1;
+
                 end
         end
         meanRMSE_perBin = sqrt(squaredErrorPerBin ./ countPerBin);
@@ -110,13 +121,15 @@ function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName
         % Store fold results
         RMSE_bin(fold) = mean(meanRMSE_perBin);
         RMSEs(fold) = sqrt(meanSqError / n_predictions);
-        accuracies(fold) = mean(accuracy_perBin)*100;
+        accuracies_bin(fold) = mean(accuracy_perBin)*100;
+        accuracies(fold) = correctCount / totalCount;
     end
 
     % Compute average results
     meanRMSE_bin = mean(RMSE_bin);
     meanRMSE = mean(RMSEs);
-    meanAccuracy = mean(accuracies);
+    meanAccuracy_bin = mean(accuracies_bin);
+    meanAccuracy = mean(accuracies) * 100;
 
     % End timing
     elapsedTime = toc;
@@ -127,6 +140,8 @@ function [meanRMSE, meanAccuracy] = testFunction_for_students_MTb_kfold(teamName
     % Display results
     fprintf('Average RMSE: %.4f\n', meanRMSE);
     fprintf('Average RMSE over time bins: %.4f\n', meanRMSE_bin);
+    fprintf('Average Classification Accuracy over time bins: %.2f%%\n', meanAccuracy_bin);
     fprintf('Average Classification Accuracy: %.2f%%\n', meanAccuracy);
     fprintf('Total Execution Time: %.2f seconds\n', elapsedTime);
+    
 end
