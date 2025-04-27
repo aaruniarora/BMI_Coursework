@@ -9,5 +9,5 @@ This project involves designing a causal neural decoder to estimate a monkey's 2
 - Task: Continuous hand position estimation without using future data
 - Scoring: RMSE (Root Mean Squared Error) in cm
 
-###Acknowledgements
+### Acknowledgements
 Special thanks to Prof. Krishna Shenoy's Laboratory for the neural data and to the BMI 2025 course organised by Dr Claudia Clopath and the GTAs for organising this competition.
