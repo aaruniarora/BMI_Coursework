@@ -1,1 +1,0 @@
-{"lda":6,"RMSE":6.5557,"_wandb":{"runtime":1},"_step":0,"k":15,"len_b":6,"elapsedTime":19.93,"_runtime":0.906755,"alpha_est":0.3,"mean_acc":100,"pca_thres":0.44,"alpha":0.35,"pow":1,"_timestamp":1.7422174809512126e+09}
