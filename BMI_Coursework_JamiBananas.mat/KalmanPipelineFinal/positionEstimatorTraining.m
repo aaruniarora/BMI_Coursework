@@ -90,14 +90,18 @@ function modelParameters = positionEstimatorTraining(training_data)
     end
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
-    [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
+    % [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
 
     %% Kalman
+    selected_neurons = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 74, 75, 77, 78, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98];
+    modelParameters.selected_neurons = selected_neurons;
+
     for dir_idx = 1:directions
 
         for tr = 1:training_length
-
-            [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data(tr,dir_idx), neurons);
+            % positionEstimatorTraining_one_trial(training_data, selected_neurons, lag, num_bins, start_idx)
+            [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data(tr,dir_idx), ...
+                selected_neurons, bin_group, start_idx);
             Parameters.A{tr}=A;
             Parameters.H{tr}=H;
             Parameters.Q{tr}=Q;
@@ -154,7 +158,7 @@ end
 %% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
 
 function [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data, selected_neurons, ...
-    lag, num_bins, start_idx)
+    lag, start_idx)
 % Function for 'one trial' parameters estimation (A_(tr, dir), H_(tr, dir), 
 % Q_(tr, dir), W_(tr, dir)) for a given angle
 
@@ -162,11 +166,13 @@ function [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data, selected
     nb_states = 4; % X Y Vx Vy 
     % NB: testing phase revealed that the inclusion of acceleration components in the state vector did not improved the performance of the decoder. 
     % Therefore, acceleration was excluded (only 4 states are used).
+    time_max = length(training_data.handPos) - start_idx; 
 
     % Build observation matrix z
+    num_bins = floor(time_max/lag); 
     for nr = 1:length(selected_neurons)
         neuron = selected_neurons(nr);
-        spike = training_data.spikes(neuron, start_idx+1:(start_idx+num_bins*lag));
+        spike = training_data.spikes(neuron,  start_idx+1:(start_idx+num_bins*lag));
         spike = reshape(spike, lag, num_bins);
         spike_count = sum(spike, 1);
         z(nr, :) = spike_count / lag;
