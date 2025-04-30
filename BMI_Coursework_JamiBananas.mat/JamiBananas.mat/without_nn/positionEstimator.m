@@ -64,8 +64,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
        % Classify using hard or soft kNN. Soft kNN can be distance (dist) or exponential (exp) based weighting
        output_label = KNN_classifier(directions, test_weight, train_weight, k, pow, alp, 'soft', 'dist');
-       %output_label = nearestCentroid(test_weight, train_weight, 'euclidean');
-       %output_label = output_label(1); 
+
    else 
        % After max time window, retain previous classification
        % output_label = mode(modelParameters.actLabel);
@@ -461,57 +460,4 @@ function pos = position_calc(spikes_matrix, firing_mean, b, avg, curr_bin,reg_me
     catch
         pos = pos(end, 1); % Fallback to last position if specific T_end is not accessible
     end
-end
-%% HELPER FUNCTIONS FOR Nearest centroid method
-
-function predictedLabel = nearestCentroid(testProjection, trainingProjection, distanceMetric)
-% Nearest-Centroid classifier (one of 8 classes) with selectable distance metric.
-%
-% Inputs
-%   testProjection     – [D × Ntest] columns are test samples in LDA space
-%   trainingProjection – [D × Ntrain] columns are training samples in LDA space
-%   distanceMetric     – 'euclidean' | 'manhattan' | 'cosine' | 'minkowski'
-%
-% Output
-%   predictedLabel     – [Ntest × 1] integer class labels (1…8)
-
-    % ----- Setup ---------------------------------------------------------
-    numDirections          = 8;
-    numTrialsPerDirection  = size(trainingProjection,2) / numDirections;
-    directionLabels        = repelem(1:numDirections, numTrialsPerDirection);
-
-    % ----- Centroid computation -----------------------------------------
-    centroids = zeros(size(trainingProjection,1), numDirections);     % (D × 8)
-    for dirIdx = 1:numDirections
-        cols               = directionLabels == dirIdx;
-        centroids(:,dirIdx)= mean(trainingProjection(:,cols), 2);
-    end
-
-    % ----- Distance matrix ----------------------------------------------
-    Ntest  = size(testProjection,2);
-    dists  = zeros(Ntest, numDirections);
-
-    for iTest = 1:Ntest
-        for dirIdx = 1:numDirections
-            diff = testProjection(:,iTest) - centroids(:,dirIdx);
-            switch distanceMetric
-                case 'euclidean'   % L2
-                    dists(iTest,dirIdx) = sum(diff.^2);
-                case 'manhattan'   % L1
-                    dists(iTest,dirIdx) = sum(abs(diff));
-                case 'cosine'      % 1 – cosine similarity
-                    dists(iTest,dirIdx) = 1 - ...
-                        (dot(testProjection(:,iTest), centroids(:,dirIdx)) / ...
-                        (norm(testProjection(:,iTest)) * norm(centroids(:,dirIdx))));
-                case 'minkowski'   % p = 3 (adjust p if you like)
-                    p = 3;
-                    dists(iTest,dirIdx) = sum(abs(diff).^p)^(1/p);
-                otherwise
-                    error('Unsupported distance metric.');
-            end
-        end
-    end
-
-    % ----- Final prediction (nearest centroid) --------------------------
-    [~, predictedLabel] = min(dists, [], 2);
 end
