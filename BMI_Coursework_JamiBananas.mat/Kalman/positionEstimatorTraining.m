@@ -13,7 +13,7 @@ function modelParameters = positionEstimatorTraining(training_data)
 %   4. Applies PCA for dimensionality reduction
 %   5. Applies LDA to find class-discriminative features
 %   6. Stores features and labels for later kNN decoding
-%   7. Trains a regression model (PCR - ridge and lasso optional) to map spikes to (x,y)
+%   7. Trains a regression model (Kalman) to map spikes to (x,y)
 %
 % Outputs:
 %   modelParameters - struct storing all learned parameters:
@@ -119,45 +119,9 @@ function modelParameters = positionEstimatorTraining(training_data)
         modelParameters.Q{dir_idx}=sum(cat(3,Parameters.Q{:}),3)./training_length; 
 
     end
-    
-    %% PCR
-    % poly_degree = 1;
-    % modelParameters.polyd = poly_degree;
-    % reg_meth = 'standard';
-    % modelParameters.reg_meth = reg_meth;
-    % 
-    % time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
-    % time_interval = start_idx:bin_group:stop_idx;
-    % 
-    % % modelling hand positions separately for each direction
-    % for dir_idx = 1:directions
-    % 
-    %     % Extract the current direction's hand position data for all trials
-    %     curr_X_pos = formatted_xPos(:,:,dir_idx);
-    %     curr_Y_pos = formatted_yPos(:,:,dir_idx);
-    % 
-    %     % Loop through each time window to calculate regression coefficients that predict hand positions from neural data
-    %     for win_idx = 1:((stop_idx-start_idx)/bin_group)+1
-    % 
-    %         % Calculate regression coefficients and the windowed firing rates for the current time window and direction
-    %         [reg_coeff_X, reg_coeff_Y, win_firing] = calc_reg_coeff(win_idx, time_division, labels, ...
-    %             dir_idx, spikes_matrix, pca_threshold, time_interval, curr_X_pos, curr_Y_pos,poly_degree, reg_meth);
-    %         % figure; plot(regressionCoefficientsX, regressionCoefficientsY); title('PCR');
-    % 
-    %         % Store in model parameters
-    %         modelParameters.pcr(dir_idx,win_idx).bx = reg_coeff_X;
-    %         modelParameters.pcr(dir_idx,win_idx).by = reg_coeff_Y;
-    %         modelParameters.pcr(dir_idx,win_idx).f_mean = mean(win_firing,2);
-    % 
-    %         % And store the mean hand positions across all trials for each time window   
-    %         modelParameters.averages(win_idx).av_X = squeeze(mean(xPos,1));
-    %         modelParameters.averages(win_idx).av_Y = squeeze(mean(yPos,1));
-    % 
-    %     end
-    % end    
 end
 
-%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
+%% HELPER FUNCTIONS 
 
 function [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data, selected_neurons, ...
     lag, start_idx)
@@ -224,4 +188,344 @@ function [A,H,Q,W] = positionEstimatorTraining_one_trial(training_data, selected
     Q = (z*z' - H*x*z');
     Q = Q / (num_bins);
 
+end
+
+%% Preprocessing
+function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Preprocessing function for spike trains
+%
+% Input:
+%   training_data - original neural dataset with spikes and hand positions
+%   bin_group     - number of ms per time bin (e.g., 20 ms)
+%   filter_type   - 'EMA' or 'Gaussian'
+%   alpha         - EMA smoothing constant (0 < alpha < 1)
+%   sigma         - std deviation for Gaussian smoothing (in ms)
+%   debug         - if 'debug', plots are shown
+%
+% Output:
+%   preprocessed_data - struct with binned, smoothed firing rates per trial
+%
+% Steps:
+%   1. Pads all trials to max trial time length
+%   2. Bins spike counts over `bin_group` intervals
+%   3. Applies square root transform
+%   4. Applies either a recursive filter, exponential moving average (EMA),
+%      or Gaussian smoothing
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % Initialise
+    [rows, cols] = size(training_data); 
+    preprocessed_data = struct;
+
+    spike_cells = {training_data.spikes};
+    max_time_length = max(cellfun(@(sc) size(sc, 2), spike_cells));
+    clear spike_cells;
+
+    % Fill NaNs with 0's and pad each trial’s spikes out to max_time_length
+    for tl = 1:rows
+        for dir = 1:cols
+            curr_spikes = training_data(tl, dir).spikes; 
+            curr_spikes = fill_nan(curr_spikes, 'spikes');
+            [num, T] = size(curr_spikes);
+            if T < max_time_length
+                padNeeded = max_time_length - T;
+                training_data(tl, dir).spikes = [curr_spikes, zeros(num, padNeeded)]; % repmat(curr_spikes(:, end), 1, padNeeded)
+            end
+        end
+    end
+
+    % Bin the spikes by summing counts over non-overlapping windows to get the firing rate
+    for c = 1:cols
+        for r = 1:rows
+            train = training_data(r,c);
+            [neurons, timepoints] = size(train.spikes);
+            num_bins = floor(timepoints / bin_group); % 28
+
+            binned_spikes = zeros(neurons, num_bins);
+
+            for b = 1:num_bins
+                start_time = (b-1)*bin_group + 1; % 1, 21, 41, ..., 541
+                end_time = b*bin_group; % 20, 40, 60, ..., 560
+                if b == num_bins % gets all the leftover points for the last bin
+                    binned_spikes(:,b) = sum(train.spikes(:, start_time:end), 2);
+                else
+                    binned_spikes(:,b) = sum(train.spikes(:, start_time:end_time), 2);
+                end
+            end
+            
+            % Apply sqrt transformation 
+            sqrt_spikes = sqrt(binned_spikes);
+
+           % Apply gaussian smoothing
+            if strcmp(filter_type, 'Gaussian')
+                gKernel = gaussian_filter(bin_group, sigma);
+                % Convolve each neuron's spike train with the Gaussian kernel.
+                gaussian_spikes = zeros(size(sqrt_spikes));
+                for n = 1:neurons
+                    gaussian_spikes(n,:) = conv(sqrt_spikes(n,:), gKernel, 'same')/(bin_group/1000);
+                end
+                preprocessed_data(r,c).rate = gaussian_spikes; % spikes per millisecond
+            end
+
+            % Apply EMA smoothing
+            if strcmp(filter_type, 'EMA')
+                ema_spikes = ema_filter(sqrt_spikes, alpha, neurons);
+                preprocessed_data(r,c).rate = ema_spikes / (bin_group/1000); % spikes per second
+            end            
+
+        end
+    end
+
+    if strcmp(debug, 'debug')
+        plot_r = 1; plot_c = 1; plot_n =1;
+        figure; sgtitle('After preprocessing');
+        subplot(1,2,1); hold on;
+        % plot(training_data(plot_r,plot_c).spikes(plot_n,:), DisplayName='Original', LineWidth=1.5); 
+        plot(preprocessed_data(plot_r,plot_c).rate(plot_n,:), DisplayName='Preprocessed', LineWidth=1.5);
+        xlabel('Bins'); ylabel('Firing Rate (spikes/s)');
+        title('Spikes'); legend show; hold off;
+    
+        subplot(1,2,2); hold on;
+        plot(preprocessed_data(plot_r,plot_c).handPos(1,:), preprocessed_data(plot_r,plot_c).handPos(2,:), DisplayName='Original', LineWidth=1.5); 
+        xlabel('x pos'); ylabel('y pos');
+        title('Hand Positions'); legend show; hold off;
+    end
+end
+
+
+function gKernel = gaussian_filter(bin_group, sigma)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Generates a normalized 1D Gaussian kernel for convolution
+% Inputs:
+%   bin_group - bin size in ms
+%   sigma     - standard deviation of the Gaussian in ms
+% Output:
+%   gKernel   - 1D vector of Gaussian filter values
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % Create a 1D Gaussian kernel centered at zero.
+    gaussian_window = 10*(sigma/bin_group);
+    e_std = sigma/bin_group;
+    alpha = (gaussian_window-1)/(2*e_std);
+
+    time_window = -(gaussian_window-1)/2:(gaussian_window-1)/2;
+    gKernel = exp((-1/2) * (alpha * time_window/((gaussian_window-1)/2)).^2)';
+    gKernel = gKernel / sum(gKernel);
+end
+
+
+function ema_spikes = ema_filter(sqrt_spikes, alpha, num_neurons)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Applies exponential moving average (EMA) smoothing to spike data
+% Inputs:
+%   sqrt_spikes  - sqrt-transformed spike matrix [neurons x time bins]
+%   alpha        - smoothing factor (higher = more recent weight)
+%   num_neurons  - number of input neurons
+% Output:
+%   ema_spikes   - smoothed spike matrix
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    ema_spikes = zeros(size(sqrt_spikes)); 
+    for n = 1:num_neurons
+        for t = 2:size(sqrt_spikes, 2)
+            ema_spikes(n, t) = alpha * sqrt_spikes(n, t) + (1 - alpha) * ema_spikes(n, t - 1);
+        end
+    end
+end
+
+
+function data = fill_nan(data, data_type)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Fills NaN values in spike or hand position data
+% For spikes the NaN values are replaced with 0's and for hand position
+% data we perform a forward then a backward fill.
+% Inputs:
+%   data       - input vector/matrix
+%   data_type  - 'spikes' or 'handpos'
+% Output:
+%   data       - cleaned data with NaNs filled
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    if strcmp(data_type, 'spikes')
+        data(isnan(data)) = 0;
+    end
+    
+    if strcmp(data_type, 'handpos')
+        % Forward fill
+        for r = 2:length(data)
+            if isnan(data(r))
+                data(r) = data(r-1);
+            end
+        end
+        % Backward fill for any remaining NaNs
+        for r = length(data)-1:-1:1
+            if isnan(data(r))
+                data(r) = data(r+1);
+            end
+        end
+    end
+end
+
+function removed_neurons = remove_neurons(spike_matrix, neurons, debug)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Identifies and returns neurons with average firing rate < 0.5 Hz
+% Remove neurons with very low average firing rate for numerical stability.
+%
+% Inputs:
+%   spike_matrix - matrix of spike data [neurons*bin x trials]
+%   neurons      - original number of neurons
+% Output:
+%   removed_neurons - indices of low-firing neurons
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    removed_neurons = []; 
+    for neuronIdx = 1:neurons
+        avgFiringRate = mean(mean(spike_matrix(neuronIdx:neurons:end, :)));
+        if avgFiringRate < 0.5
+            removed_neurons = [removed_neurons, neuronIdx]; 
+        end
+    end
+
+    if strcmp(debug, 'debug')
+        disp(removed_neurons);
+    end
+end
+
+%% Feature extraction
+function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin, debug)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Converts 2D spike data into a 2D matrix of features across bins
+% In our case, rearranging data as:
+% rows: 2744 time points --> 98 neurons x 28 bins
+% cols: 800 --> 8 angles and 100 trials so angle 1, trial 1; angle 1, trial 2; ...; angle 8, Trial 100
+%
+% Inputs:
+%   preprocessed_data - output from preprocessing function
+%   neurons           - number of neurons before filtering
+%   curr_bin          - number of bins to include (time window)
+%   debug             - 'debug' enables plotting
+%
+% Outputs:
+%   spikes_matrix     - matrix [neurons*curr_bin x trials]
+%   labels            - direction labels for each column (trial)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    [rows, cols] = size(preprocessed_data);
+    labels = zeros(rows * cols, 1);
+    
+    for r = 1:rows
+        for c = 1:cols
+            for k = 1:curr_bin
+                c_idx = rows * (c - 1) + r; % 100 (1 - 1) + 1 = 1; 1; 1...x13; 101; 
+                r_start = neurons * (k - 1) + 1; % 98 (1 - 1) + 1 = 1; 99; 197;...
+                r_end = neurons * k; % 98; 196;...
+                spikes_matrix(r_start:r_end,c_idx) = preprocessed_data(r,c).rate(:,k);  
+                labels(c_idx) = c; 
+            end
+        end
+    end
+
+    if strcmp(debug, 'debug')
+        figure; title(['Firing Rate for Bin ' num2str(curr_bin)]);
+        plot(spikes_matrix); 
+    end
+end
+
+%% Dim reduction
+function [coeff, score, nPC] = perform_PCA(data, threshold, debug)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Performs Principal Component Analysis (PCA)
+%
+% Inputs:
+%   data        - neural feature matrix [neurons x trials]
+%   threshold   - cumulative variance threshold (e.g., 0.44)
+%   debug       - if 'debug', plot score
+%
+% Outputs:
+%   coeff       - principal component coefficients (eigenvectors)
+%   score       - projected data in PCA space
+%   nPC         - number of PCs meeting variance threshold
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % nPC = threshold;
+    data_centred = data - mean(data,2);
+    % C = cov(data_centred);
+    C = data_centred' * data_centred;
+    [V, D] = eig(C);
+    [d, idx] = sort(diag(D), 'descend');
+    V = V(:, idx);
+    explained_variance = cumsum(d) / sum(d);
+    nPC = find(explained_variance >= threshold, 1); % Find the number of PCs that explain at least 44% variance
+    score = data_centred * V * diag(1./sqrt(d));
+    score = score(:, 1:nPC);
+    coeff = V(:, 1:nPC);
+
+    if strcmp(debug, 'debug')
+        figure; plot(score);
+    end
+end
+
+function [outputs, weights] = perform_LDA(data, score, labels, lda_dim, ...
+    training_length, debug)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Performs Linear Discriminant Analysis (LDA) on PCA-transformed data.
+% This method is called MDF, most discriminant feature, extraction.
+%
+% Inputs:
+%   data         - original neural data
+%   score        - PCA-transformed data
+%   labels       - movement direction labels
+%   lda_dim      - desired number of LDA components
+%   training_len - number of trials per direction
+%   debug        - plot if 'debug'
+%
+% Outputs:
+%   outputs      - LDA-transformed features
+%   weights      - projection of original data into LDA space
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % Compute the LDA projection matrix.
+    classes = unique(labels); % gets 1 to 8
+
+    overall_mean = mean(data, 2); % zeros(size(data), length(classes));
+    scatter_within = zeros(size(data,1)); % How much do the samples of each class vary around their own class mean?
+    scatter_between = zeros(size(data,1)); % How different are the means of the classes from the overall mean?
+    
+    for i = 1:length(classes)
+        % Calculate mean vectors for each direction
+        indicies = training_length*(i-1)+1 : i*training_length; % 1, 101, 201.. : 100, 200, 300... 
+
+        % Mean of current direction
+        mean_dir = mean(data(:, indicies), 2);
+
+        % Scatter within (current direction)
+        deviation_within = data(:, indicies) - mean_dir;
+        scatter_within = scatter_within + deviation_within * deviation_within';
+
+        % Scatter between (current direction)
+        deviation_between = mean_dir - overall_mean;
+        scatter_between = scatter_between + training_length * (deviation_between * deviation_between');
+    end
+    
+    % Reduce the size of the matrices with PCA to improve numerical stability
+    project_within = score' * scatter_within * score;  
+    project_between = score' * scatter_between * score;
+    
+    % Sorting eigenvalues and eigenvectors in descending order
+    [V_lda, D_lda] = eig(pinv(project_within) * project_between);
+    [~, sortIdx] = sort(diag(D_lda), 'descend'); 
+    
+    % Selects the given lda_dimension eigenvectors to form the final
+    % projection (from original feature space to LDA space)
+    V_lda = V_lda(:, sortIdx(1:lda_dim));
+    outputs = score * V_lda;  % [features x lda_dimension]
+    
+    % Mapping the mean-centered neural data to the discriminative space
+    weights = outputs' * (data - overall_mean);  % [lda_dimension x samples]
+
+    if strcmp(debug, 'debug')
+        figure; plot(outputs); title('Output');
+        figure; plot(weights); title('Weight');
+    end
 end
