@@ -91,11 +91,15 @@ function modelParameters = positionEstimatorTraining(training_data)
 
     %% Hand Positions Preprocessing: Binning (20ms), Centering, Padding
     % [xPos, yPos, formatted_xPos, formatted_yPos] = handPos_processing(training_data, num_bins*bin_group);
-    for c = 1:directions
-        for r = 1:training_length
+    for c = 1:cols
+        for r = 1:rows
+            % Mean Centre
+            curr_x = training_data(r,c).handPos(1,:);
+            curr_y = training_data(r,c).handPos(2,:);
+            
             % Fill missing values in hand position
-            training_data(r,c).handPos(1,:) = fill_nan(training_data(r,c).handPos(1,:), 'handpos');
-            training_data(r,c).handPos(2,:) = fill_nan(training_data(r,c).handPos(2,:), 'handpos');
+            curr_x = fill_nan(curr_x, 'handpos');
+            curr_y = fill_nan(curr_y, 'handpos');
         end
     end
 
