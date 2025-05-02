@@ -96,7 +96,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     %% PCR
     poly_degree = 1;
     modelParameters.polyd = poly_degree;
-    reg_meth = 'lms';
+    reg_meth = 'standard';
     modelParameters.reg_meth = reg_meth;
 
     time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
@@ -632,42 +632,6 @@ function [reg_coeff_X, reg_coeff_Y, filtered_firing ] = ...
 
             reg_coeff_X = score * Bx;
             reg_coeff_Y = score * By;
-
-        case 'lms'
-            mu = 1e-5;  % Smaller learning rate for stability
-            num_epochs = 10;
-        
-            % Initialize weights
-            [~, num_features] = size(X);
-            W_x = zeros(num_features, 1);
-            W_y = zeros(num_features, 1);
-        
-            % Clean up any NaNs or Infs in data
-            valid_idx = all(isfinite(X), 2) & isfinite(centered_X) & isfinite(centered_Y);
-            X_clean = X(valid_idx, :);
-            Yx_clean = centered_X(valid_idx);
-            Yy_clean = centered_Y(valid_idx);
-        
-            % Normalize each row to unit norm to avoid large gradients
-            X_norms = sqrt(sum(X_clean.^2, 2)) + 1e-8;
-            X_clean = bsxfun(@rdivide, X_clean, X_norms);
-        
-            % LMS training loop
-            for epoch = 1:num_epochs
-                for i = 1:size(X_clean, 1)
-                    xi = X_clean(i, :);
-                    err_x = Yx_clean(i) - xi * W_x;
-                    err_y = Yy_clean(i) - xi * W_y;
-        
-                    W_x = W_x + mu * xi' * err_x;
-                    W_y = W_y + mu * xi' * err_y;
-                end
-            end
-        
-            % Final LMS weights in PCA space
-            reg_coeff_X = score * W_x;
-            reg_coeff_Y = score * W_y;
-
 
         otherwise
             error('Unknown regression method: choose standard, ridge, or lasso');
