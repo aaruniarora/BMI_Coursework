@@ -1,4 +1,8 @@
 function RMSEs = testFunction_for_all_models(modelFolders)
+% To run:
+% modelFolders = {'Soft kNN-PCR', 'Soft kNN-Kalman', 'Soft kNN-LMS', 'SVM-PCR', 'Hard kNN-PCR', 'NN-PCR'};
+% RMSEs = testFunction_for_all_models(modelFolders);
+
     load monkeydata0.mat
     rng(2013);
     ix = randperm(length(trial));
