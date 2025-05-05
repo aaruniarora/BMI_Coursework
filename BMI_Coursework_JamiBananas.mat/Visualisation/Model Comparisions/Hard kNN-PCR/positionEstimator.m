@@ -32,7 +32,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     end
 
     %% Soft kNN parameters
-    k = 8;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
+    k = 20;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
     pow = 1;   % Power factor for distance-based weighting
     alp = 1e-6; % Scaling for exponential weighting
 

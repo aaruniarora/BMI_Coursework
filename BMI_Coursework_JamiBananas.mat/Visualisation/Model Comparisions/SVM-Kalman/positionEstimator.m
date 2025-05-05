@@ -18,14 +18,16 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     %% Parameters
+    bin_group = 20; % Time bin width in ms
     alpha = 0.3; % EMA smoothing factor
     sigma = 50; % Std. deviation for Gaussian filter
 
     start_idx = modelParameters.start_idx;
     stop_idx = modelParameters.stop_idx;
-    bin_group = modelParameters.bin_group;
     directions = modelParameters.directions; % get the number of angles
-    polyDegree = modelParameters.polyd;
+    % polyDegree = modelParameters.polyd;
+    class_meth = modelParameters.class_meth;
+
 
     if ~isfield(modelParameters, 'actLabel')
         modelParameters.actLabel = []; % Default label
@@ -54,81 +56,122 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 
    %% Predict movement direction using kNN classification
    if curr_bin <= stop_idx 
+       curr_firing_mean = modelParameters.class(idx).mean_firing;
+
+       if strcmp(class_meth, 'svm')
+           % if curr_bin > numel(modelParameters.class)
+           %      % If it exceeds, set curr_bin to the last element
+           %      curr_bin = numel(modelParameters.class)
+           %  end
+           SVMModel = modelParameters.class(idx).svm;
+       %      % Check the size of the test data
+       %      [nRows_test, nCols_test] = size(spikes_test);
+       %      expected_num_features = modelParameters.class(curr_bin).svm_feature;
+       %      % Handle case where test data has fewer features than expected
+       %      if nCols_test < expected_num_features
+       %          % Pad the test data with zeros to match the number of features
+       %          spikes_test = [spikes_test, zeros(nRows_test, expected_num_features - nCols_test)];
+       %      elseif nCols_test > expected_num_features
+       %          % Truncate the test data to match the expected number of features
+       %          spikes_test = spikes_test(:, 1:expected_num_features);
+       %      end   
+       predicted_angles = predict(SVMModel, spikes_test');
+           output_label = predicted_angles(end);
+       elseif strcmp(class_meth, 'lda')
+        
        % Extract LDA projections and mean firing for the current bin
        train_weight = modelParameters.class(idx).lda_weights;
        test_weight =  modelParameters.class(idx).lda_outputs;
-       curr_firing_mean = modelParameters.class(idx).mean_firing;
-       
+
        % Project test spike vector to LDA space
        test_weight = test_weight' * (spikes_test(:) - curr_firing_mean(:));
 
        % Classify using hard or soft kNN. Soft kNN can be distance (dist) or exponential (exp) based weighting
        output_label = KNN_classifier(directions, test_weight, train_weight, k, pow, alp, 'soft', 'dist');
-       % output_label = nearestCentroid(test_weight, train_weight, 'euclidean');
-       %output_label = output_label(1); 
+       end
    else 
        % After max time window, retain previous classification
        % output_label = mode(modelParameters.actLabel);
        output_label = modelParameters.actualLabel;
    end
-
-    % if modelParameters.trial_id == 0
-    % modelParameters.trial_id = test_data.trialId;
-    % else 
-    % if modelParameters.trial_id ~= test_data.trialId
-    %     modelParameters.iterations = 0;
-    %     modelParameters.trial_id = test_data.trialId;
-    %     modelParameters.actLabel = [];
-    % end
-    % end
-    % modelParameters.iterations = modelParameters.iterations + 1;
-    % 
-    % % disp(modelParameters.actualLabel)
-    % 
-    % %% Reset `actualLabel` if there are repeated inconsistencies
-    % if ~isempty(modelParameters.actLabel)
-    %     if modelParameters.actLabel(end) ~= output_label
-    %         if length(modelParameters.actLabel) > 10 && sum(modelParameters.actLabel(end-4:end) ~= output_label) >= 5
-    %             % If the last 5 classifications contain at least 3 mismatches, reset
-    %             modelParameters.actLabel = [];
-    %         end
-    %     end
-    % end
-    % 
-    % len_b_mode = 7;
-    % % Update the actual label in model parameters
-    % if ~isempty(modelParameters.actLabel)
-    % 
-    % % Accumulate stable labels before following the mode
-    % if length(modelParameters.actLabel) > len_b_mode  % Wait until there are at least 5 labels
-    %     output_label = mode(modelParameters.actLabel);
-    % end
-    % modelParameters.actLabel(end+1) = output_label;
-    % modelParameters.actLabel(:) = output_label;  % Ensure all entries are consistent
-    % else
-    %     % For the very first classification, just set the label
-    %     modelParameters.actLabel(end+1) = output_label;
-    % end 
-    % 
-    % output_label = modelParameters.actLabel(end);
-    % modelParameters.actualLabel = modelParameters.actLabel(end); 
-
-    modelParameters.actualLabel = output_label; 
+   output_label = round(output_label);
+   modelParameters.actualLabel = output_label; 
     
     %% Estimate hand position (x, y) using PCR model
-    av_X = modelParameters.averages(idx).av_X(:, output_label);
-    av_Y =  modelParameters.averages(idx).av_Y(:, output_label);
-    meanFiring = modelParameters.pcr(output_label, idx).f_mean;
-    bx = modelParameters.pcr(output_label, idx).bx;
-    by = modelParameters.pcr(output_label, idx).by;
-    reg_meth = modelParameters.reg_meth;
+    % av_X = modelParameters.averages(idx).av_X(:, output_label);
+    % av_Y =  modelParameters.averages(idx).av_Y(:, output_label);
+    % meanFiring = modelParameters.pcr(output_label, idx).f_mean;
+    % bx = modelParameters.pcr(output_label, idx).bx;
+    % by = modelParameters.pcr(output_label, idx).by;
+    % reg_meth = modelParameters.reg_meth;
+    % 
+    % x = position_calc(spikes_test, meanFiring, bx, av_X, curr_bin,reg_meth,polyDegree);
+    % y = position_calc(spikes_test, meanFiring, by, av_Y, curr_bin,reg_meth,polyDegree);
 
-    x = position_calc(spikes_test, meanFiring, bx, av_X, curr_bin,reg_meth,polyDegree);
-    y = position_calc(spikes_test, meanFiring, by, av_Y, curr_bin,reg_meth,polyDegree);
+    %% Kalman Filtering for (x,y) prediction
+    
+    predicted_angle = output_label(1);
+    
+    nb_states = 4; % (x,y,Vx,Vy) states coordinates 
+    % NB: testing phase revealed that the inclusion of acceleration components in the state vector did not improved the performance of the decoder. 
+    % Therefore, acceleration was excluded (only 4 states are used).
+    I = eye(nb_states); 
+
+    % get Kalman filter parameters for predicted angle
+    H = modelParameters.H{predicted_angle};
+    Q = modelParameters.Q{predicted_angle};
+    A = modelParameters.A{predicted_angle};
+    W = modelParameters.W{predicted_angle};
+    selected_neurons = modelParameters.selected_neurons;
+
+    
+    % Compute firing rate 
+    zk = test_data.spikes(selected_neurons, start_idx+1:end);
+
+    if isempty(zk) % t=320 ms (no motion)
+        zk = [];
+    else %(motion starts)
+        zk = zk(:,end-bin_group+1:end); % only keep the last 20 ms for the prediction 
+        zk = (sum(zk,2)/bin_group); % firing rate 
+       
+    end
+    
+    %  Kalman filter initialization
+    if isempty(zk)
+        prior = zeros(nb_states); 
+        xk = zeros(nb_states,1);
+        xk(1:2) = test_data.startHandPos; % first estimate: actual initial position
+        x = xk(1);
+        y = xk(2);
+        % Kk = prior*H'/(H*prior*H'+Q);
+        Kk = prior*H' * pinv(H*prior*H' + Q + eps*eye(size(Q)));
+        modelParameters.Kk = Kk;
+        modelParameters.posterior = prior;
+        modelParameters.decodedHandPos = xk;
+
+    % Prediction for next time steps
+    else
+        xk_previous_estimate = modelParameters.decodedHandPos;
+        posterior = modelParameters.posterior;
+        prior = A*posterior*A'+W;
+
+        % Kalman filter parameters update
+        % Reference: W. Wu, M. Black, Y. Gao, E. Bienenstock, M. Serruya,
+        % and J. Donoghue, "Inferring hand motion from multi-cell
+        % recordings in motor cortex using a kalman filter" (2002)
+
+        % Kk = prior*H'/(H*prior*H'+Q);
+        Kk = prior*H' * pinv(H*prior*H' + Q + eps*eye(size(Q)));
+        xk_estimate = A*xk_previous_estimate;
+        xk = xk_estimate+Kk*(zk-H*xk_estimate);
+        modelParameters.posterior = (I-Kk*H)*prior;
+        modelParameters.decodedHandPos = xk;
+        x = xk(1);
+        y = xk(2);
+    end
 end
 
-%% HELPER FUNCTIONS FOR PREPROCESSING OF SPIKES
-
+%%
 function preprocessed_data = preprocessing(training_data, bin_group, filter_type, alpha, sigma, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Preprocessing function for spike trains
@@ -305,9 +348,7 @@ function data = fill_nan(data, data_type)
     end
 end
 
-
-%% HELPER FUNCTIONS FOR FEATURE EXTRACTION
-
+%% Extract features
 function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, curr_bin, debug)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Converts 2D spike data into a 2D matrix of features across bins
@@ -346,7 +387,6 @@ function [spikes_matrix, labels] = extract_features(preprocessed_data, neurons, 
         plot(spikes_matrix); 
     end
 end
-
 
 %% HELPER FUNCTION TO PERFORM CLASSIFICATION WITH kNN
 
@@ -420,98 +460,4 @@ function output_label = KNN_classifier(directions, test_weight, train_weight, NN
                 error("Incorrect kNN method! Choose between 'hard' and 'soft'.");
         end
     end
-end
-
-
-%% HELPER FUNCTION FOR POSITION CALCULATION
-
-function pos = position_calc(spikes_matrix, firing_mean, b, avg, curr_bin,reg_meth,polyd)
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Calculates hand position using linear regression from spike activity
-%
-% Inputs:
-%   spikes_matrix - spike vector (after preprocessing and reshaping)
-%   firing_mean   - mean firing vector used to center the data
-%   b             - regression coefficients (from PCA-reduced space)
-%   avg           - average hand trajectory for the direction
-%   curr_bin      - current time step
-%   reg_meth      - regression method specified (standard, poly, ridge,
-%   lasso)
-%   polyd         - polynomial regression order
-% Output:
-%   pos           - estimated x or y position
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    if strcmp(reg_meth, 'poly')
-    firingVector = spikes_matrix(1:length(b));  
-    
-    % Expand features with polynomial terms but maintain 70 features
-    polyFiringVector = zeros(size(firingVector)); % Initialize same size as firingVector
-    for d = 1:polyd
-        polyFiringVector = polyFiringVector + (firingVector - mean(firing_mean)).^d;
-    end
-
-    % Predict position using polynomial regression
-    pos = polyFiringVector' * b + avg;
-    else
-    pos = (spikes_matrix(1:length(b)) - mean(firing_mean))' * b + avg;
-    end
-
-    try
-        pos = pos(curr_bin, 1);
-    catch
-        pos = pos(end, 1); % Fallback to last position if specific T_end is not accessible
-    end
-end
-%% HELPER FUNCTIONS FOR Nearest centroid method
-
-function predictedLabel = nearestCentroid(testProjection, trainingProjection, distanceMetric)
-% Nearest-Centroid classifier (one of 8 classes) with selectable distance metric.
-%
-% Inputs
-%   testProjection     – [D × Ntest] columns are test samples in LDA space
-%   trainingProjection – [D × Ntrain] columns are training samples in LDA space
-%   distanceMetric     – 'euclidean' | 'manhattan' | 'cosine' | 'minkowski'
-%
-% Output
-%   predictedLabel     – [Ntest × 1] integer class labels (1…8)
-
-    % ----- Setup ---------------------------------------------------------
-    numDirections          = 8;
-    numTrialsPerDirection  = size(trainingProjection,2) / numDirections;
-    directionLabels        = repelem(1:numDirections, numTrialsPerDirection);
-
-    % ----- Centroid computation -----------------------------------------
-    centroids = zeros(size(trainingProjection,1), numDirections);     % (D × 8)
-    for dirIdx = 1:numDirections
-        cols               = directionLabels == dirIdx;
-        centroids(:,dirIdx)= mean(trainingProjection(:,cols), 2);
-    end
-
-    % ----- Distance matrix ----------------------------------------------
-    Ntest  = size(testProjection,2);
-    dists  = zeros(Ntest, numDirections);
-
-    for iTest = 1:Ntest
-        for dirIdx = 1:numDirections
-            diff = testProjection(:,iTest) - centroids(:,dirIdx);
-            switch distanceMetric
-                case 'euclidean'   % L2
-                    dists(iTest,dirIdx) = sum(diff.^2);
-                case 'manhattan'   % L1
-                    dists(iTest,dirIdx) = sum(abs(diff));
-                case 'cosine'      % 1 – cosine similarity
-                    dists(iTest,dirIdx) = 1 - ...
-                        (dot(testProjection(:,iTest), centroids(:,dirIdx)) / ...
-                        (norm(testProjection(:,iTest)) * norm(centroids(:,dirIdx))));
-                case 'minkowski'   % p = 3 (adjust p if you like)
-                    p = 3;
-                    dists(iTest,dirIdx) = sum(abs(diff).^p)^(1/p);
-                otherwise
-                    error('Unsupported distance metric.');
-            end
-        end
-    end
-
-    % ----- Final prediction (nearest centroid) --------------------------
-    [~, predictedLabel] = min(dists, [], 2);
 end

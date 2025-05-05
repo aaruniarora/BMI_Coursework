@@ -32,7 +32,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
     end
 
     %% Soft kNN parameters
-    k = 8;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
+    k = 20;    % Number of neighbors for kNN (8 for hard kNN and 20 for soft)
     pow = 1;   % Power factor for distance-based weighting
     alp = 1e-6; % Scaling for exponential weighting
 
@@ -65,7 +65,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
        % Classify using hard or soft kNN. Soft kNN can be distance (dist) or exponential (exp) based weighting
        % output_label = KNN_classifier(directions, test_weight, train_weight, k, pow, alp, 'soft', 'dist');
        output_label = nearestCentroid(test_weight, train_weight, 'euclidean');
-       % output_label = output_label(1); 
+       %output_label = output_label(1); 
    else 
        % After max time window, retain previous classification
        % output_label = mode(modelParameters.actLabel);
