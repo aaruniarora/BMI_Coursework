@@ -16,7 +16,7 @@ addpath(teamName);
 
 % Select training and testing data (you can choose to split your data in a different way if you wish)
 trainingData = trial(ix(1:50),:);
-testData = trial(ix(95:end),:);
+testData = trial(ix(50:end),:);
 
 fprintf('Testing the continuous position estimator...')
 
