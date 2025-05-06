@@ -96,7 +96,7 @@ function modelParameters = positionEstimatorTraining(training_data)
     %% PCR
     poly_degree = 1;
     modelParameters.polyd = poly_degree;
-    reg_meth = 'lms';
+    reg_meth = 'standard';
     modelParameters.reg_meth = reg_meth;
 
     time_division = kron(bin_group:bin_group:stop_idx, ones(1, neurons)); 
