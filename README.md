@@ -10,7 +10,7 @@ This project involves designing a causal neural decoder to estimate a monkey's 2
 - Scoring: RMSE (Root Mean Squared Error) in cm
 
 Our final decoder is called JamiBananas. Alternative solutions are named in separate folders. The basic decoding pipeline in as follows:
-[![Summary Pipeline](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline_preview.png)](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline.png)
+[![Summary Pipeline](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline.png)](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline.png)
 
 ### Acknowledgements
 Special thanks to Prof. Krishna Shenoy's Laboratory for the neural data and to Dr Claudia Clopath and the GTAs for organising the BMI 2025 course and competition.
