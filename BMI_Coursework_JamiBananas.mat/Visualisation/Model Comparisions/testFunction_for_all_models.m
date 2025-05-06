@@ -28,8 +28,8 @@ function RMSEs = testFunction_for_all_models(modelFolders)
     n_predictions = 0;
 
     figure; hold on; axis square; grid;
-    title('Actual vs Predicted Trajectories from Multiple Models');
-    xlabel('X direction'); ylabel('Y direction');
+    % title('Actual vs Predicted Trajectories from Multiple Models');
+    % xlabel('X direction'); ylabel('Y direction');
 
     for tr = 1:2  % Change to full size(testData,1) to test all
         for direc = randperm(8)
@@ -77,6 +77,7 @@ function RMSEs = testFunction_for_all_models(modelFolders)
     end
 
     legendEntries = [{'Actual trajectory'}, modelFolders];
-    legend(legendEntries, 'Location', 'northeast');
+    legend(legendEntries, 'Location', 'southeast');
     set(gcf, 'Renderer', 'opengl');  % Required for alpha blending
+    save_figure(gcf, '.', 'trajectories_comp', 'pdf');
 end

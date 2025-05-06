@@ -31,7 +31,7 @@ function RMSEs = testFunction_for_all_models_avg(modelFolders)
     actualAll = cell(1, 8);
 
     for direc = 1:8
-        for tr = 1:size(testData,1)
+        for tr = 1:10%size(testData,1)
             actualAll{direc}(:,:,tr) = testData(tr,direc).handPos(1:2, times); % [2 x time]
 
             for m = 1:nModels
@@ -68,8 +68,8 @@ function RMSEs = testFunction_for_all_models_avg(modelFolders)
 
     % === Plot All Average Trajectories in One Plot ===
     figure; hold on; axis equal; grid on;
-    title('Actual vs Predicted Trajectories (Average per Direction)');
-    xlabel('X direction'); ylabel('Y direction');
+    % title('Actual vs Predicted Trajectories (Average per Direction)');
+    % xlabel('X direction'); ylabel('Y direction');
 
     % Plot actual average trajectory (black) per direction
     for d = 1:8
@@ -96,7 +96,7 @@ function RMSEs = testFunction_for_all_models_avg(modelFolders)
     end
     
     legendLabels = [{'Actual trajectory'}, modelFolders];
-    legend(legendHandles, legendLabels, 'Location', 'northeast');
+    legend(legendHandles, legendLabels, 'Location', 'southeast');
 
     % === Compute RMSE ===
     RMSEs = zeros(1, nModels);
@@ -116,4 +116,5 @@ function RMSEs = testFunction_for_all_models_avg(modelFolders)
         end
         RMSEs(m) = sqrt(totalSqErr / totalCount);
     end
+    save_figure(gcf, '.', 'trajectories_comp', 'pdf')
 end
