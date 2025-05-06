@@ -14,7 +14,7 @@ if nargin < 3, use_rng = true; end
 
 % Set random number generator
 if use_rng
-    rng(2013);
+    % rng(2013);
     disp('rng set to 2013');
 else
     disp('No rng set');
