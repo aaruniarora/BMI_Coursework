@@ -9,6 +9,8 @@ This project involves designing a causal neural decoder to estimate a monkey's 2
 - Task: Continuous hand position estimation without using future data
 - Scoring: RMSE (Root Mean Squared Error) in cm
 
-Our final decoder is called JamiBananas. Alternative solutions are named in separate folders.
+Our final decoder is called JamiBananas. Alternative solutions are named in separate folders. The basic decoding pipeline in as follows:
+[![Summary Pipeline](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline_preview.png)](BMI_Coursework_JamiBananas.mat/figures/pipline_flowchart/summary_pipeline.pdf)
+
 ### Acknowledgements
 Special thanks to Prof. Krishna Shenoy's Laboratory for the neural data and to Dr Claudia Clopath and the GTAs for organising the BMI 2025 course and competition.
