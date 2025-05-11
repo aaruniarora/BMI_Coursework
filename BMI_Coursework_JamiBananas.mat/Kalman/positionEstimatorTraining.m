@@ -14,6 +14,7 @@ function modelParameters = positionEstimatorTraining(training_data)
 %   5. Applies LDA to find class-discriminative features
 %   6. Stores features and labels for later kNN decoding
 %   7. Trains a regression model (Kalman) to map spikes to (x,y)
+%      [Kalman function adapted from https://github.com/dorltcheng/bmi-comp/tree/main/kalman
 %
 % Outputs:
 %   modelParameters - struct storing all learned parameters:

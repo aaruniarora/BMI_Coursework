@@ -7,6 +7,7 @@ function [x, y, modelParameters] = positionEstimator(test_data, modelParameters)
 %   2. Extract and reshape features from the current trial
 %   3. Classify intended movement direction using soft kNN
 %   4. Predict x and y hand position using regression coefficients
+%      Kalman function adapted from https://github.com/dorltcheng/bmi-comp/tree/main/kalman
 %
 % Inputs:
 %   test_data        - A struct representing a single trial
